@@ -139,7 +139,7 @@ def create_empty_dataset(
         if 'depth' in cam:
             features[f"observation.images.{cam}"] = {
                 "dtype": mode,
-                "shape": (480, 640),
+                "shape": (kuavo.RESIZE_H, kuavo.RESIZE_W),
                 "names": [
                     "height",
                     "width",
@@ -148,7 +148,7 @@ def create_empty_dataset(
         else:
             features[f"observation.images.{cam}"] = {
                 "dtype": mode,
-                "shape": (3, 480, 640),
+                "shape": (3, kuavo.RESIZE_H, kuavo.RESIZE_W),
                 "names": [
                     "channels",
                     "height",
@@ -364,11 +364,14 @@ def populate_dataset(
             if velocity is not None:
                 frame["observation.velocity"] = velocity[i]
             if effort is not None:
-                frame["observation.effort"] = effort[i]   
-            
+                frame["observation.effort"] = effort[i]
+
+            # frame["task"] = task
             # diagnose_frame_data(frame)
-            dataset.add_frame(frame)
-        dataset.save_episode(task="Pick the black workpiece from the white conveyor belt on your left and place it onto the white box in front of you",)
+            dataset.add_frame(frame, task=task)
+        # dataset.save_episode(task="Pick the black workpiece from the white conveyor belt on your left and place it onto the white box in front of you",)
+        dataset.save_episode()
+
     # 将失败的bag文件写入error.txt
     if failed_bags:
         with open("error.txt", "w") as f:
@@ -426,9 +429,9 @@ def port_kuavo_rosbag(
         task=task,
         episodes=episodes,
     )
-    dataset.consolidate()
+    # dataset.consolidate()
     
-@hydra.main(config_path=".", config_name="default", version_base=None)
+@hydra.main(config_path="configs_yaml", config_name="default", version_base=None)
 def main(cfg: DictConfig):
 
     global DEFAULT_JOINT_NAMES_LIST
@@ -438,7 +441,7 @@ def main(cfg: DictConfig):
     raw_dir = cfg.rosbag.rosbag_dir
     version = cfg.rosbag.lerobot_dir
 
-    task_name = os.path.basename()
+    task_name = os.path.basename(raw_dir)
     repo_id = f'lerobot/{task_name}'
     lerobot_dir = os.path.join(raw_dir,"../",version,"lerobot")
     if os.path.exists(lerobot_dir):

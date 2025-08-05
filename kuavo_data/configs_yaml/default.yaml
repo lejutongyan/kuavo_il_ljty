@@ -1,5 +1,5 @@
 rosbag:
-  rosbag_dir: D:\data\rosbag_dex_hand_10_20250805_4800
+  rosbag_dir: /home/yangzhou/data/rosbag_dex_hand_10_20250805_4800
   num_used: None
   lerobot_dir: D:\data\rosbag_dex_hand_10_20250805_4800_lerobot
 
@@ -26,7 +26,7 @@ dataset:
   relative_start: false # 是否使用相对起始位置, default=false
 
   resize:
-    width: 848
+    width: 640
     height: 480
 
 

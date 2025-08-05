@@ -124,18 +124,18 @@ def load_config(cfg) -> Config:
     
     # Create main Config object
     return Config(
-        only_arm=OmegaConf.select(cfg,"dataset.only_arm", True),
+        only_arm=OmegaConf.select(cfg,"dataset.only_arm", default=True),
         eef_type=eef_type,
         which_arm=which_arm,
-        dex_dof_needed=OmegaConf.select(cfg, 'dataset.dex_dof_needed', 1),
-        train_hz=OmegaConf.select(cfg, 'dataset.train_hz', 10),
-        main_timeline=OmegaConf.select(cfg, 'dataset.main_timeline', 'wrist_cam_h'),
-        main_timeline_fps=OmegaConf.select(cfg, 'dataset.main_timeline_fps'),
-        sample_drop=OmegaConf.select(cfg, 'dataset.sample_drop'),
-        is_binary=OmegaConf.select(cfg, 'dataset.is_binary'),
-        delta_action=OmegaConf.select(cfg, 'dataset.delta_action'),
-        relative_start=OmegaConf.select(cfg, 'dataset.relative_start'),
+        dex_dof_needed=OmegaConf.select(cfg, 'dataset.dex_dof_needed', default=1),
+        train_hz=OmegaConf.select(cfg, 'dataset.train_hz', default=10),
+        main_timeline=OmegaConf.select(cfg, 'dataset.main_timeline', default='wrist_cam_h'),
+        main_timeline_fps=OmegaConf.select(cfg, 'dataset.main_timeline_fps', default=30),
+        sample_drop=OmegaConf.select(cfg, 'dataset.sample_drop', default=0),
+        is_binary=OmegaConf.select(cfg, 'dataset.is_binary', default=False),
+        delta_action=OmegaConf.select(cfg, 'dataset.delta_action', default=False),
+        relative_start=OmegaConf.select(cfg, 'dataset.relative_start', default=False),
         resize=resize_config,
-        task_description=OmegaConf.select(cfg, 'dataset.task_description', "Pick and Place Task")
+        task_description=OmegaConf.select(cfg, 'dataset.task_description', default="Pick and Place Task")
     )
 

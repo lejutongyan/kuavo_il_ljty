@@ -53,7 +53,7 @@ def init_parameters(cfg):
     global TASK_DESCRIPTION
 
     
-    from config_dataset import load_config
+    from .config_dataset import load_config
     config = load_config(cfg)
 
     # 从配置文件加载基本设置
