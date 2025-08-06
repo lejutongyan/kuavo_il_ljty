@@ -431,7 +431,7 @@ def port_kuavo_rosbag(
     )
     # dataset.consolidate()
     
-@hydra.main(config_path="configs_yaml", config_name="default", version_base=None)
+@hydra.main(config_path="configs", config_name="default", version_base=None)
 def main(cfg: DictConfig):
 
     global DEFAULT_JOINT_NAMES_LIST

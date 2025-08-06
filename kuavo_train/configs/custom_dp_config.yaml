@@ -1,0 +1,60 @@
+hydra:  # Hydra 配置文件保存目录，不用管，仅供检查使用
+  run:
+    dir: ./outputs/train_hydra_save/singlerun/${now:%Y%m%d_%H%M%S}  # 单次运行目录
+  sweep:
+    dir: ./outputs/train_hydra_save/multirun/${now:%Y%m%d_%H%M%S}  # sweep 时的根目录
+    subdir: ${hydra:job.override_dirname}
+
+
+task: "single_grasp_inbox_lerobot"
+timestamp: ${now:%Y%m%d_%H%M%S}
+training_params:
+    repoid: "lerobot/${task}"
+    output_directory: "outputs/train/example_${task}_diffusion"
+    timestamp: ${timestamp}
+    # "root": None,
+    root: "D:/data/single_grasp_inbox_lerobot/lerobot"
+    seed: 42
+    training_epoch: 1000
+    batch_size: 128, # 64
+    save_freq_epoch: 10
+    log_freq: 1
+    device: "cuda"
+    learning_rate: 1e-3 # 1e-4
+    weight_decay: 1e-6
+    scheduler_name: "cosine"
+    scheduler_warmup_steps: 100
+    ema_power: 0.75
+    num_workers: 4
+    drop_last: False
+
+diffusion_configs:
+    _target_: wrapper.DiffusionConfigWrapper.CustomDiffusionConfigWrapper  # 基础配置
+    n_obs_steps: 2
+    horizon: 16
+    n_action_steps: 8 #1,2,4,12
+    normalization_mapping:
+      RGB: MEAN_STD
+      DEPTH: MIN_MAX
+    spatial_softmax_num_keypoints: 64
+    crop_is_random: True
+    crop_shape: [360, 636]
+
+    optimizer_lr: ${training_params.learning_rate}
+
+    custom:
+      resize_shape: [128, 128]  # +
+      RGB_Augmentation: True
+      # state encoder.
+      use_state_encoder: False  # +
+      state_feature_dim: 128  # +
+
+      # Unet.
+      use_unet: False  # +
+
+      # transformer
+      use_transformer: True
+      transformer_n_emb: 256
+      transformer_n_head: 16
+      transformer_n_layer: 8
+      transformer_dropout: 0.01
