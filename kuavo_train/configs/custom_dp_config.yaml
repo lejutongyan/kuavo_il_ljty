@@ -39,6 +39,7 @@ diffusion_configs:
     spatial_softmax_num_keypoints: 64
     crop_is_random: True
     crop_shape: [360, 636]
+    use_separate_rgb_encoder_per_camera: True
 
     optimizer_lr: ${training_params.learning_rate}
 

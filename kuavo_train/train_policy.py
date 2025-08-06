@@ -52,6 +52,7 @@ def main(cfg: DictConfig):
     print("Vision backbone:", dp_cfg.vision_backbone)
     print("Normalization mapping:", dp_cfg.normalization_mapping)
     print("Use UNet:", dp_cfg.custom.use_unet)
+    print("optimizer_lr:", dp_cfg.optimizer_lr)
     # dp_cfg = DiffusionConfig(input_features=input_features, output_features=output_features, device=device)
 
 
