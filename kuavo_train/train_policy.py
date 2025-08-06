@@ -1,3 +1,5 @@
+import lerobot_patches.custom_patches  # Ensure custom patches are applied, DON'T REMOVE THIS LINE!
+
 import hydra
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
@@ -14,7 +16,6 @@ from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from torch.utils.tensorboard import SummaryWriter
 from hydra.utils import instantiate
 from hydra.core.config_store import ConfigStore
-from wrapper.DiffusionConfigWrapper import CustomDiffusionConfigWrapper
 
 
 @hydra.main(config_path="configs", config_name="custom_dp_config", version_base=None)
@@ -42,13 +43,20 @@ def main(cfg: DictConfig):
     dataset_metadata = LeRobotDatasetMetadata(cfg.training_params.repoid, root=root)
     total_frames = dataset_metadata.info['total_frames']
     features = dataset_to_policy_features(dataset_metadata.features)
+    print("Original dataset features:", dataset_metadata.features)
     print(f"Dataset features: {features}")
+
     output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
     input_features = {key: ft for key, ft in features.items() if key not in output_features}
+    print(f"Input features: {input_features}")
+    print(f"Output features: {output_features}")
 
     # Policies are initialized with a configuration class, in this case `DiffusionConfig`. For this example,
     # we'll just use the defaults and so no arguments other than input/output features need to be passed.
     dp_cfg = instantiate(cfg.diffusion_configs, input_features=input_features, output_features=output_features, device=device)
+
+    print("rgb_image_features",dp_cfg.rgb_image_features)  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
+    # dp_cfg.validate_features()  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
     print("Vision backbone:", dp_cfg.vision_backbone)
     print("Normalization mapping:", dp_cfg.normalization_mapping)
     print("Use UNet:", dp_cfg.custom.use_unet)

@@ -29,7 +29,7 @@ training_params:
     drop_last: False
 
 diffusion_configs:
-    _target_: wrapper.DiffusionConfigWrapper.CustomDiffusionConfigWrapper  # 基础配置
+    _target_: kuavo_train.wrapper.DiffusionConfigWrapper.CustomDiffusionConfigWrapper  # 基础配置
     n_obs_steps: 2
     horizon: 16
     n_action_steps: 8 #1,2,4,12
@@ -43,7 +43,7 @@ diffusion_configs:
     spatial_softmax_num_keypoints: 64
     crop_is_random: True
     crop_shape: [360, 636]
-    use_separate_rgb_encoder_per_camera: True
+    use_separate_rgb_encoder_per_camera: False
 
     optimizer_lr: ${training_params.learning_rate}
 
