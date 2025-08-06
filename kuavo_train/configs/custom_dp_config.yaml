@@ -34,8 +34,12 @@ diffusion_configs:
     horizon: 16
     n_action_steps: 8 #1,2,4,12
     normalization_mapping:
-      RGB: MEAN_STD
-      DEPTH: MIN_MAX
+      RGB: 
+        _target_: lerobot.configs.types.NormalizationMode
+        value: MEAN_STD
+      DEPTH: 
+        _target_: lerobot.configs.types.NormalizationMode
+        value: MIN_MAX
     spatial_softmax_num_keypoints: 64
     crop_is_random: True
     crop_shape: [360, 636]
