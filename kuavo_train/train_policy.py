@@ -11,11 +11,9 @@ import torch
 from lerobot.configs.types import FeatureType
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
-from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
-from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from kuavo_train.wrapper.DiffusionConfigWrapper import CustomDiffusionConfigWrapper
 from torch.utils.tensorboard import SummaryWriter
 from hydra.utils import instantiate
-from hydra.core.config_store import ConfigStore
 
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
@@ -66,9 +64,8 @@ def main(cfg: DictConfig):
     print("Use UNet:", dp_cfg.custom.use_unet)
     print("optimizer_lr:", dp_cfg.optimizer_lr)
     # dp_cfg = DiffusionConfig(input_features=input_features, output_features=output_features, device=device)
-    dp_cfg = OmegaConf.merge(dp_cfg, dp_cfg.custom)  # Merge custom configurations into the main config
     # We can now instantiate our policy with this config and the dataset stats.
-    policy = DiffusionPolicy(dp_cfg, dataset_stats=dataset_metadata.stats)
+    policy = CustomDiffusionConfigWrapper(dp_cfg, dataset_stats=dataset_metadata.stats)
     policy.train()
     policy.to(device)
 

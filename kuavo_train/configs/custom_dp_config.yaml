@@ -63,3 +63,5 @@ diffusion_configs:
       transformer_n_head: 16
       transformer_n_layer: 8
       transformer_dropout: 0.01
+    
+    use_custom_override: False

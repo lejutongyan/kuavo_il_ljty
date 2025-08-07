@@ -3,11 +3,12 @@ from dataclasses import dataclass,field
 import copy
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
-
+from omegaconf import DictConfig
 
 @dataclass
 class CustomDiffusionConfigWrapper(DiffusionConfig):
     custom: Dict[str, Any] = field(default_factory=dict)
+    use_custom_override: bool = False
 
     def __post_init__(self):
         super().__post_init__()
@@ -22,6 +23,11 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
         merged.update(self.normalization_mapping)
 
         self.normalization_mapping = merged
+
+        if isinstance(self.custom, DictConfig):
+            for k, v in self.custom.items():
+                if self.use_custom_override or not hasattr(self, k):
+                    setattr(self, k, v)
 
     @property
     def rgb_image_features(self) -> dict[str, PolicyFeature]:
@@ -80,3 +86,4 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
                 raise ValueError(
                     f"`{key}` does not match `{first_image_key}`, but we expect all image shapes to match."
                 )
+
