@@ -17,6 +17,10 @@ from torch.utils.tensorboard import SummaryWriter
 from hydra.utils import instantiate
 from hydra.core.config_store import ConfigStore
 
+from diffusers.optimization import get_scheduler
+from diffusers.training_utils import EMAModel
+from tqdm import tqdm
+
 
 @hydra.main(config_path="configs", config_name="custom_dp_config", version_base=None)
 def main(cfg: DictConfig):
@@ -62,12 +66,100 @@ def main(cfg: DictConfig):
     print("Use UNet:", dp_cfg.custom.use_unet)
     print("optimizer_lr:", dp_cfg.optimizer_lr)
     # dp_cfg = DiffusionConfig(input_features=input_features, output_features=output_features, device=device)
-
-
+    dp_cfg = OmegaConf.merge(dp_cfg, dp_cfg.custom)  # Merge custom configurations into the main config
     # We can now instantiate our policy with this config and the dataset stats.
     policy = DiffusionPolicy(dp_cfg, dataset_stats=dataset_metadata.stats)
     policy.train()
     policy.to(device)
+
+        # Extract keys containing "observation" and "action" from metadata.info['features']
+    delta_timestamps_keys = {
+        key: value for key, value in dataset_metadata.info['features'].items()
+        if "observation" in key or "action" in key
+    }
+    delta_timestamps = {}
+    for key in delta_timestamps_keys:
+        if "observation" in key:
+            delta_timestamps[key] = [i / dataset_metadata.fps for i in cfg.observation_delta_indices]
+        elif "action" in key:
+            delta_timestamps[key] = [i / dataset_metadata.fps for i in cfg.action_delta_indices]
+
+
+    # Another policy-dataset interaction is with the delta_timestamps. Each policy expects a given number frames
+    # which can differ for inputs, outputs and rewards (if there are some).
+    # delta_timestamps = {
+    #     "observation.images.top": [i / dataset_metadata.fps for i in cfg.observation_delta_indices],
+    #     "observation.state": [i / dataset_metadata.fps for i in cfg.observation_delta_indices],
+    #     "action": [i / dataset_metadata.fps for i in cfg.action_delta_indices],
+    # }
+
+    # delta_timestamps = {
+    #     "observation.image": [i / dataset_metadata.fps for i in cfg.observation_delta_indices],
+    #     "observation.state": [i / dataset_metadata.fps for i in cfg.observation_delta_indices],
+    #     "action": [i / dataset_metadata.fps for i in cfg.action_delta_indices],
+    # }
+
+    # # In this case with the standard configuration for Diffusion Policy, it is equivalent to this:
+    # delta_timestamps = {
+    #     # Load the previous image and state at -0.1 seconds before current frame,
+    #     # then load current image and state corresponding to 0.0 second.
+    #     "observation.image": [-0.1, 0.0],
+    #     "observation.state": [-0.1, 0.0],
+    #     # Load the previous action (-0.1), the next action to be executed (0.0),
+    #     # and 14 future actions with a 0.1 seconds spacing. All these actions will be
+    #     # used to supervise the policy.
+    #     "action": [-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4],
+    # }
+
+    # We can then instantiate the dataset with these delta_timestamps configuration.
+    dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root)
+
+    # EMA and optimizer
+    ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)
+
+    optimizer = torch.optim.AdamW(params=policy.parameters(), lr=cfg.training_params.learning_rate, weight_decay=cfg.training_params.weight_decay)
+    lr_scheduler = get_scheduler(name=cfg.training_params.scheduler_name, 
+                                 optimizer=optimizer, 
+                                 num_warmup_steps=cfg.training_params.scheduler_warmup_steps, 
+                                 num_training_steps=training_epoch*(total_frames//batch_size + 1))
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        num_workers=cfg.training_params.num_workers,
+        batch_size=batch_size,
+        shuffle=True,
+        pin_memory=device.type != "cpu",
+        drop_last=cfg.training_params.drop_last,
+    )
+
+    # Run training loop.
+    step = 0
+    for epoch in range(training_epoch):
+        # 使用 tqdm 进度条（推荐，直观）
+        epoch_bar = tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Epoch {epoch+1}/{training_epoch}")
+        for batch_idx, batch in epoch_bar:
+            batch = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
+            loss, _ = policy.forward(batch)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            lr_scheduler.step()
+            ema.step(policy)
+            writer.add_scalar("train/lr", lr_scheduler.get_last_lr()[0], step)
+
+            if step % log_freq == 0:
+                writer.add_scalar("train/loss", loss.item(), step)
+                epoch_bar.set_postfix({"loss": f"{loss.item():.3f}", "step": step})
+                # 传统文本输出方式（如需切换，取消注释下行并注释上行 set_postfix）
+                # print(f"epoch: {epoch+1}/{training_epoch} | batch: {batch_idx+1}/{len(dataloader)} | step: {step} | loss: {loss.item():.3f}")
+            if epoch % save_freq_epoch == 0:
+                tem_directory = output_directory / f"epoch{epoch}"
+                policy.save_pretrained(tem_directory)
+            step += 1
+
+    # Save a policy checkpoint.
+    policy.save_pretrained(output_directory)
+    writer.close()
 
 if __name__ == "__main__":
     main()
