@@ -1,3 +1,4 @@
+from calendar import c
 import lerobot_patches.custom_patches  # Ensure custom patches are applied, DON'T REMOVE THIS LINE!
 
 import hydra
@@ -11,13 +12,25 @@ import torch
 from lerobot.configs.types import FeatureType
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
-from kuavo_train.wrapper.DiffusionConfigWrapper import CustomDiffusionConfigWrapper
+from kuavo_train.wrapper.DiffusionPolicyWrapper import CustomDiffusionPolicyWrapper
 from torch.utils.tensorboard import SummaryWriter
 from hydra.utils import instantiate
 
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from tqdm import tqdm
+
+from omegaconf import DictConfig
+
+def find_uninitialized_dictconfigs(cfg, path="config"):
+    if isinstance(cfg, DictConfig):
+        for k, v in cfg.items():
+            if isinstance(v, DictConfig) and not v._content():  # 空 DictConfig
+                print(f"[!] Empty DictConfig at: {path}.{k}")
+            elif isinstance(v, DictConfig) or isinstance(v, dict):
+                find_uninitialized_dictconfigs(v, path=f"{path}.{k}")
+
+
 
 
 @hydra.main(config_path="configs", config_name="custom_dp_config", version_base=None)
@@ -34,6 +47,7 @@ def main(cfg: DictConfig):
 
     # # Select your device
     device = torch.device(cfg.training_params.device)
+
 
     # Number of offline training steps (we'll only do offline training for this example.)
     # Adjust as you prefer. 5000 steps are needed to get something worth evaluating.
@@ -55,21 +69,25 @@ def main(cfg: DictConfig):
 
     # Policies are initialized with a configuration class, in this case `DiffusionConfig`. For this example,
     # we'll just use the defaults and so no arguments other than input/output features need to be passed.
-    dp_cfg = instantiate(cfg.diffusion_configs, input_features=input_features, output_features=output_features, device=device)
+    dp_cfg = instantiate(cfg.diffusion_configs, input_features=input_features, output_features=output_features, device=cfg.training_params.device)
 
     print("rgb_image_features",dp_cfg.rgb_image_features)  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
     # dp_cfg.validate_features()  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
     print("Vision backbone:", dp_cfg.vision_backbone)
     print("Normalization mapping:", dp_cfg.normalization_mapping)
-    print("Use UNet:", dp_cfg.custom.use_unet)
+    print("Use UNet:", dp_cfg.use_unet)
     print("optimizer_lr:", dp_cfg.optimizer_lr)
     # dp_cfg = DiffusionConfig(input_features=input_features, output_features=output_features, device=device)
     # We can now instantiate our policy with this config and the dataset stats.
-    policy = CustomDiffusionConfigWrapper(dp_cfg, dataset_stats=dataset_metadata.stats)
+    # print("dataset_stats:", dataset_metadata.stats)
+    
+
+    policy = CustomDiffusionPolicyWrapper(dp_cfg, dataset_stats=dataset_metadata.stats)
+
     policy.train()
     policy.to(device)
 
-        # Extract keys containing "observation" and "action" from metadata.info['features']
+    # Extract keys containing "observation" and "action" from metadata.info['features']
     delta_timestamps_keys = {
         key: value for key, value in dataset_metadata.info['features'].items()
         if "observation" in key or "action" in key
@@ -77,9 +95,9 @@ def main(cfg: DictConfig):
     delta_timestamps = {}
     for key in delta_timestamps_keys:
         if "observation" in key:
-            delta_timestamps[key] = [i / dataset_metadata.fps for i in cfg.observation_delta_indices]
+            delta_timestamps[key] = [i / dataset_metadata.fps for i in dp_cfg.observation_delta_indices]
         elif "action" in key:
-            delta_timestamps[key] = [i / dataset_metadata.fps for i in cfg.action_delta_indices]
+            delta_timestamps[key] = [i / dataset_metadata.fps for i in dp_cfg.action_delta_indices]
 
 
     # Another policy-dataset interaction is with the delta_timestamps. Each policy expects a given number frames

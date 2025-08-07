@@ -656,6 +656,13 @@ def crop_image(image, target_range, random_crop=False):
     - cropped_image: np.ndarray or list of np.ndarray, the cropped image(s) with the same format as the input.
     """
     # 确认 target_range 格式正确
+    try:
+        target_range = list(target_range)
+    except Exception as e:
+        try:
+            target_range = tuple(target_range)
+        except Exception:
+            raise ValueError("target_range must be convertible to a list or tuple") from e
     assert isinstance(target_range, (list, tuple))
 
     if isinstance(image, Tensor):

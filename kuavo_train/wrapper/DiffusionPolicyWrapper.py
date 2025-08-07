@@ -16,7 +16,7 @@ from lerobot.policies.utils import (
     get_output_shape,
     populate_queues,
 )
-from DiffusionModelWrapper import CustomDiffusionModelWrapper
+from kuavo_train.wrapper.DiffusionModelWrapper import CustomDiffusionModelWrapper
 
 
 class CustomDiffusionPolicyWrapper(DiffusionPolicy):
@@ -24,7 +24,7 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
                  config: CustomDiffusionConfigWrapper,
                  dataset_stats: dict[str, dict[str, Tensor]] | None = None,
     ):
-        super().__init__(config)
+        super().__init__(config, dataset_stats)
         self.augmenter = Augmenter(config)
         self.diffusion = CustomDiffusionModelWrapper(config)
 
@@ -97,7 +97,6 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
             if self.config.RGB_Augmentation:
                 self.augmenter.RGB_Augmenter.set_random_params()
                 batch[key] = self.augmenter.RGB_Augmenter.apply_augment_sequence(batch[key])
-
         batch = self.normalize_inputs(batch)
         if self.config.rgb_image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original

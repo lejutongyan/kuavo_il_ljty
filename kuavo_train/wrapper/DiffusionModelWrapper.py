@@ -1,5 +1,5 @@
 import torch.nn as nn
-from DiffusionConfigWrapper import CustomDiffusionConfigWrapper
+from kuavo_train.wrapper.DiffusionConfigWrapper import CustomDiffusionConfigWrapper
 import math
 from collections import deque
 from typing import Callable
@@ -27,7 +27,7 @@ from lerobot.policies.diffusion.modeling_diffusion import (_make_noise_scheduler
 
 class CustomDiffusionModelWrapper(DiffusionModel):
     def __init__(self, config: CustomDiffusionConfigWrapper):
-        super().__init__()
+        super().__init__(config)
         self.config = config
 
         # Build observation encoders (depending on which observations are provided).

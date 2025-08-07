@@ -1,10 +1,11 @@
 from typing import Any, Dict
-from dataclasses import dataclass,field
+from dataclasses import dataclass,fields,field
 import copy
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf, ListConfig
 
+@DiffusionConfig.register_subclass("custom_diffusion")
 @dataclass
 class CustomDiffusionConfigWrapper(DiffusionConfig):
     custom: Dict[str, Any] = field(default_factory=dict)
@@ -28,6 +29,27 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
             for k, v in self.custom.items():
                 if self.use_custom_override or not hasattr(self, k):
                     setattr(self, k, v)
+        self.input_features = self._normalize_feature_dict(self.input_features)
+        self.output_features = self._normalize_feature_dict(self.output_features)
+        self._convert_omegaconf_fields()
+
+    def _normalize_feature_dict(self, d: Any) -> dict[str, PolicyFeature]:
+        if isinstance(d, DictConfig):
+            d = OmegaConf.to_container(d, resolve=True)
+        if not isinstance(d, dict):
+            raise TypeError(f"Expected dict or DictConfig, got {type(d)}")
+
+        return {
+            k: PolicyFeature(**v) if isinstance(v, dict) and not isinstance(v, PolicyFeature) else v
+            for k, v in d.items()
+        }
+    
+    def _convert_omegaconf_fields(self):
+        for f in fields(self):
+            val = getattr(self, f.name)
+            if isinstance(val, (ListConfig, DictConfig)):
+                converted = OmegaConf.to_container(val, resolve=True)
+                setattr(self, f.name, converted)
 
     @property
     def rgb_image_features(self) -> dict[str, PolicyFeature]:
