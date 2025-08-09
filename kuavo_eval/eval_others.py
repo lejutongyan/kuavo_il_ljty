@@ -32,12 +32,19 @@ def main(cfg: DictConfig):
     # Create a directory to store the video of the evaluation
     output_directory = Path("outputs/eval/") / cfg.task / cfg.method / cfg.timestamp / f"epoch{cfg.epoch}"
     output_directory.mkdir(parents=True, exist_ok=True)
+    
+    env_obs_select = {"aloha":{"env": "gym_aloha/AlohaInsertion-v0",
+                               "obs": "observation.images.top"},
+                  "pusht": {"env": "gym_pusht/PushT-v0",
+                               "obs": "observation.image"}
+                    }[cfg.env]
 
     env = gym.make(
-        "gym_aloha/AlohaInsertion-v0",
+        env_obs_select["env"],
         obs_type="pixels_agent_pos",
         max_episode_steps=cfg.max_episode_steps,
     )
+
 
     # We can verify that the shapes of the features expected by the policy match the ones from the observations
     # produced by the environment
@@ -75,18 +82,19 @@ def main(cfg: DictConfig):
             while not done:
                 # Prepare observation for the policy
                 state = torch.tensor(numpy_observation["agent_pos"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-                image = (torch.tensor(numpy_observation["pixels"]['top'], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0) / 255).to(device, non_blocking=True)
+                # print(type(numpy_observation['pixels']))
+                if isinstance(numpy_observation["pixels"],dict):
+                    # print(f"Observations:{[k for k in numpy_observation['pixels'].keys()]}")
+                    image = (torch.tensor(numpy_observation["pixels"]['top'], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0) / 255).to(device, non_blocking=True)
+                else:
+                    image = (torch.tensor(numpy_observation["pixels"], dtype=torch.float32).permute(2, 0, 1).unsqueeze(0) / 255).to(device, non_blocking=True)
 
 
                 # Create the policy input dictionary
                 observation = {
                     "observation.state": state,
-                    "observation.images.top": image,
+                    env_obs_select["obs"]: image,
                 }
-                # observation = {
-                #     "observation.state": state,
-                #     "observation.image": image,
-                # }
 
                 # Predict the next action with respect to the current observation
                 with torch.inference_mode():

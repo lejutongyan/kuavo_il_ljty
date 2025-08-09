@@ -6,4 +6,5 @@ task: "aloha_sim_insert_human"
 method: "aloha_insert_no_aug"
 timestamp: "run_20250710_164014"
 epoch: 239
-max_episode_steps: 500
+max_episode_steps: 150
+env: aloha
