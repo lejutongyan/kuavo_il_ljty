@@ -16,8 +16,16 @@ from lerobot.policies.utils import (
     get_output_shape,
     populate_queues,
 )
-from kuavo_train.wrapper.DiffusionModelWrapper import CustomDiffusionModelWrapper
 
+from kuavo_train.wrapper.DiffusionModelWrapper import CustomDiffusionModelWrapper
+import os, builtins
+from pathlib import Path
+from typing import TypeVar
+from huggingface_hub import HfApi, ModelCard, ModelCardData, hf_hub_download
+from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
+from huggingface_hub.errors import HfHubHTTPError
+
+T = TypeVar("T", bound="CustomDiffusionPolicyWrapper")
 
 class CustomDiffusionPolicyWrapper(DiffusionPolicy):
     def __init__(self,         
@@ -117,3 +125,65 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
         loss = self.diffusion.compute_loss(batch)
         # no output_dict so returning None
         return loss, None
+    
+    @classmethod
+    def from_pretrained(
+        cls: builtins.type[T],
+        pretrained_name_or_path: str | Path,
+        *,
+        config: CustomDiffusionConfigWrapper | None = None,
+        force_download: bool = False,
+        resume_download: bool | None = None,
+        proxies: dict | None = None,
+        token: str | bool | None = None,
+        cache_dir: str | Path | None = None,
+        local_files_only: bool = False,
+        revision: str | None = None,
+        strict: bool = False,
+        **kwargs,
+    ) -> T:
+        """
+        The policy is set in evaluation mode by default using `policy.eval()` (dropout modules are
+        deactivated). To train it, you should first set it back in training mode with `policy.train()`.
+        """
+        if config is None:
+            config = CustomDiffusionConfigWrapper.from_pretrained(
+                pretrained_name_or_path=pretrained_name_or_path,
+                force_download=force_download,
+                resume_download=resume_download,
+                proxies=proxies,
+                token=token,
+                cache_dir=cache_dir,
+                local_files_only=local_files_only,
+                revision=revision,
+                **kwargs,
+            )
+        model_id = str(pretrained_name_or_path)
+        # print(config)
+        instance = cls(config, **kwargs)
+        if os.path.isdir(model_id):
+            print("Loading weights from local directory")
+            model_file = os.path.join(model_id, SAFETENSORS_SINGLE_FILE)
+            policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
+        else:
+            try:
+                model_file = hf_hub_download(
+                    repo_id=model_id,
+                    filename=SAFETENSORS_SINGLE_FILE,
+                    revision=revision,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    proxies=proxies,
+                    resume_download=resume_download,
+                    token=token,
+                    local_files_only=local_files_only,
+                )
+                policy = cls._load_as_safetensor(instance, model_file, config.device, strict)
+            except HfHubHTTPError as e:
+                raise FileNotFoundError(
+                    f"{SAFETENSORS_SINGLE_FILE} not found on the HuggingFace Hub in {model_id}"
+                ) from e
+
+        policy.to(config.device)
+        policy.eval()
+        return policy

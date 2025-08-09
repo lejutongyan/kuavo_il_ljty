@@ -8,22 +8,25 @@ hydra:  # Hydra 配置文件保存目录，不用管，仅供检查使用
 
 task: "single_grasp_inbox_lerobot"
 timestamp: ${now:%Y%m%d_%H%M%S}
+method: "aloha_insert_without_any_Aug"
 training_params:
+    
     repoid: "lerobot/${task}"
-    output_directory: "outputs/train/example_${task}_diffusion"
+    output_directory: "outputs/train/${task}"
     timestamp: ${timestamp}
     # "root": None,
     root: "D:/data/single_grasp_inbox_lerobot/lerobot"
     seed: 42
     training_epoch: 1000
-    batch_size: 128 # 64
-    save_freq_epoch: 10
+    batch_size: 64 # 64
+    save_freq_epoch: 1
     log_freq: 1
     device: "cuda"
     learning_rate: 1e-3 # 1e-4
     weight_decay: 1e-6
     scheduler_name: "cosine"
     scheduler_warmup_steps: 100
+    accumulation_steps: 16
     ema_power: 0.75
     num_workers: 4
     drop_last: False
@@ -42,15 +45,15 @@ diffusion_configs:
         value: MIN_MAX
     spatial_softmax_num_keypoints: 64
     crop_is_random: True
-    crop_shape: [84, 84]
-    # crop_shape: [360, 480]
+    # crop_shape: [84, 84]
+    crop_shape: [420, 560]
     use_separate_rgb_encoder_per_camera: False
 
     optimizer_lr: ${training_params.learning_rate}
 
     custom:
-      resize_shape: [128, 128]  # +
-      RGB_Augmentation: True
+      resize_shape: [210, 280]  # +
+      RGB_Augmentation: False
       # state encoder.
       use_state_encoder: False  # +
       state_feature_dim: 128  # +
@@ -64,5 +67,3 @@ diffusion_configs:
       transformer_n_head: 16
       transformer_n_layer: 8
       transformer_dropout: 0.01
-    
-    use_custom_override: False

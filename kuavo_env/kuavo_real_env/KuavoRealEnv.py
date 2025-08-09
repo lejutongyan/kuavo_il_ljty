@@ -8,7 +8,7 @@ from std_msgs.msg import Bool
 import cv2
 import gymnasium as gym
 import time
-from env.KuavoBaseRosEnv import KuavoBaseRosEnv
+from kuavo_env.KuavoBaseRosEnv import KuavoBaseRosEnv
 
 class KuavoRealEnv(KuavoBaseRosEnv):
 

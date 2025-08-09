@@ -5,7 +5,7 @@ import rosbag
 import time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Int32
-from env.KuavoBaseRosEnv import KuavoBaseRosEnv
+from kuavo_env.KuavoBaseRosEnv import KuavoBaseRosEnv
 
 class KuavoRosbagPlayer(KuavoBaseRosEnv):
     """基于KuavoBaseRosEnv的rosbag播放器"""

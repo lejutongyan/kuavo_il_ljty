@@ -8,7 +8,7 @@ from std_msgs.msg import Bool
 import cv2
 import gymnasium as gym
 import time
-from env.config.config_kuavo_env import load_config
+from kuavo_env.config.config_kuavo_env import load_config
 from kuavo_msgs.msg._sensorsData import sensorsData
 from kuavo_msgs.msg._robotHandPosition import robotHandPosition
 from kuavo_msgs.msg._lejuClawState import lejuClawState

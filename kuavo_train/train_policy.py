@@ -1,4 +1,4 @@
-from calendar import c
+
 import lerobot_patches.custom_patches  # Ensure custom patches are applied, DON'T REMOVE THIS LINE!
 
 import hydra
@@ -17,18 +17,10 @@ from torch.utils.tensorboard import SummaryWriter
 from hydra.utils import instantiate
 
 from diffusers.optimization import get_scheduler
-from diffusers.training_utils import EMAModel
+# from diffusers.training_utils import EMAModel
 from tqdm import tqdm
 
 from omegaconf import DictConfig
-
-def find_uninitialized_dictconfigs(cfg, path="config"):
-    if isinstance(cfg, DictConfig):
-        for k, v in cfg.items():
-            if isinstance(v, DictConfig) and not v._content():  # 空 DictConfig
-                print(f"[!] Empty DictConfig at: {path}.{k}")
-            elif isinstance(v, DictConfig) or isinstance(v, dict):
-                find_uninitialized_dictconfigs(v, path=f"{path}.{k}")
 
 
 
@@ -38,7 +30,7 @@ def main(cfg: DictConfig):
 
     root = cfg.training_params.root
     # Create a output_directory.
-    output_directory = Path(cfg.training_params.output_directory)
+    output_directory = Path(cfg.training_params.output_directory)/ cfg.method
     timestamp = cfg.training_params.timestamp
     output_directory = output_directory / f"run_{timestamp}"
 
@@ -130,7 +122,7 @@ def main(cfg: DictConfig):
     dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root)
 
     # EMA and optimizer
-    ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)
+    # ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)
 
     optimizer = torch.optim.AdamW(params=policy.parameters(), lr=cfg.training_params.learning_rate, weight_decay=cfg.training_params.weight_decay)
     lr_scheduler = get_scheduler(name=cfg.training_params.scheduler_name, 
@@ -155,19 +147,21 @@ def main(cfg: DictConfig):
         for batch_idx, batch in epoch_bar:
             batch = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
             loss, _ = policy.forward(batch)
+            loss /= cfg.training_params.accumulation_steps
             loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+            if batch_idx % cfg.training_params.accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
             lr_scheduler.step()
-            ema.step(policy)
+            # ema.step(policy)
             writer.add_scalar("train/lr", lr_scheduler.get_last_lr()[0], step)
 
             if step % log_freq == 0:
                 writer.add_scalar("train/loss", loss.item(), step)
-                epoch_bar.set_postfix({"loss": f"{loss.item():.3f}", "step": step})
+                epoch_bar.set_postfix({"loss": f"{(loss * cfg.training_params.accumulation_steps).item():.3f}", "step": step})
                 # 传统文本输出方式（如需切换，取消注释下行并注释上行 set_postfix）
                 # print(f"epoch: {epoch+1}/{training_epoch} | batch: {batch_idx+1}/{len(dataloader)} | step: {step} | loss: {loss.item():.3f}")
-            if epoch % save_freq_epoch == 0:
+            if (epoch+1) % save_freq_epoch == 0:
                 tem_directory = output_directory / f"epoch{epoch}"
                 policy.save_pretrained(tem_directory)
             step += 1

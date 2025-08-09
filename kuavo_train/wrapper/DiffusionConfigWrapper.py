@@ -1,15 +1,26 @@
 from typing import Any, Dict
 from dataclasses import dataclass,fields,field
 import copy
+from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
 from omegaconf import DictConfig, OmegaConf, ListConfig
+from copy import deepcopy
+from pathlib import Path
+import draccus
+from huggingface_hub.constants import CONFIG_NAME
+import os, builtins,json,tempfile
+from pathlib import Path
+from typing import TypeVar
+from huggingface_hub import HfApi, ModelCard, ModelCardData, hf_hub_download
+from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
+from huggingface_hub.errors import HfHubHTTPError
+T = TypeVar("T", bound="CustomDiffusionConfigWrapper")
 
-@DiffusionConfig.register_subclass("custom_diffusion")
+@PreTrainedConfig.register_subclass("custom_diffusion")
 @dataclass
 class CustomDiffusionConfigWrapper(DiffusionConfig):
     custom: Dict[str, Any] = field(default_factory=dict)
-    use_custom_override: bool = False
 
     def __post_init__(self):
         super().__post_init__()
@@ -24,11 +35,14 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
         merged.update(self.normalization_mapping)
 
         self.normalization_mapping = merged
-
-        if isinstance(self.custom, DictConfig):
+        # print("~~~~~~~~~~~~~~~",type(self.custom))
+        if isinstance(self.custom, DictConfig) or isinstance(self.custom, dict):
             for k, v in self.custom.items():
-                if self.use_custom_override or not hasattr(self, k):
+                if not hasattr(self, k):
+                    # print("from config",k,v)
                     setattr(self, k, v)
+                else:
+                    raise ValueError(f"Custom setting '{k}: {v}' conflicts with the parent base configuration. Remove it from 'custom' and modify the parent configuration instead.")
         self.input_features = self._normalize_feature_dict(self.input_features)
         self.output_features = self._normalize_feature_dict(self.output_features)
         self._convert_omegaconf_fields()
@@ -108,4 +122,47 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
                 raise ValueError(
                     f"`{key}` does not match `{first_image_key}`, but we expect all image shapes to match."
                 )
+    def _save_pretrained(self, save_directory: Path) -> None:
+        cfg_copy = deepcopy(self)
+        if isinstance(cfg_copy.custom, dict):
+            for k in list(cfg_copy.custom.keys()):
+                if hasattr(cfg_copy, k):
+                    delattr(cfg_copy, k)
+        elif hasattr(cfg_copy, "custom") and hasattr(cfg_copy.custom, "keys"):
+            for k in list(cfg_copy.custom.keys()):
+                if hasattr(cfg_copy, k):
+                    delattr(cfg_copy, k)
+        with open(save_directory / CONFIG_NAME, "w") as f, draccus.config_type("json"):
+            draccus.dump(cfg_copy, f, indent=4)
 
+    
+    @classmethod
+    def from_pretrained(
+        cls: type[T],
+        pretrained_name_or_path: str | Path,
+        *,
+        force_download: bool = False,
+        resume_download: bool = None,
+        proxies: dict | None = None,
+        token: str | bool | None = None,
+        cache_dir: str | Path | None = None,
+        local_files_only: bool = False,
+        revision: str | None = None,
+        **policy_kwargs,
+    ) -> T:
+        # 用父类类型调用 from_pretrained，触发 Choice 机制识别子类
+        parent_cls = PreTrainedConfig  # 或者直接 DiffusionConfig
+
+        # 调用父类的 from_pretrained，注意传入所有参数和额外参数
+        return parent_cls.from_pretrained(
+            pretrained_name_or_path,
+            force_download=force_download,
+            resume_download=resume_download,
+            proxies=proxies,
+            token=token,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            revision=revision,
+            **policy_kwargs,
+        )
+        
