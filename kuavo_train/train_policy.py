@@ -152,7 +152,8 @@ def main(cfg: DictConfig):
             if batch_idx % cfg.training_params.accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-            lr_scheduler.step()
+                lr_scheduler.step()
+
             # ema.step(policy)
             writer.add_scalar("train/lr", lr_scheduler.get_last_lr()[0], step)
 

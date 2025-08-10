@@ -17,7 +17,7 @@ training_params:
     # "root": None,
     root: "D:/data/single_grasp_inbox_lerobot/lerobot"
     seed: 42
-    training_epoch: 1000
+    training_epoch: 4000
     batch_size: 64 # 64
     save_freq_epoch: 10
     log_freq: 1
@@ -30,6 +30,7 @@ training_params:
     ema_power: 0.75
     num_workers: 4
     drop_last: False
+    max_training_step: 20000
 
 diffusion_configs:
     _target_: kuavo_train.wrapper.DiffusionConfigWrapper.CustomDiffusionConfigWrapper  # 基础配置
@@ -53,9 +54,9 @@ diffusion_configs:
 
     custom:
       resize_shape: [210, 280]  # +
-      RGB_Augmentation: False
+      RGB_Augmentation: False  # +
       # state encoder.
-      use_state_encoder: False  # +
+      use_state_encoder: True  # +
       state_feature_dim: 128  # +
 
       # Unet.
