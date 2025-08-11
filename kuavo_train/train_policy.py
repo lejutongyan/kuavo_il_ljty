@@ -125,10 +125,14 @@ def main(cfg: DictConfig):
     # ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)
 
     optimizer = torch.optim.AdamW(params=policy.parameters(), lr=cfg.training_params.learning_rate, weight_decay=cfg.training_params.weight_decay)
+    
+    updates_per_epoch = (total_frames // (batch_size * cfg.training_params.accumulation_steps)) + 1
+    total_update_steps = training_epoch * updates_per_epoch
+    
     lr_scheduler = get_scheduler(name=cfg.training_params.scheduler_name, 
                                  optimizer=optimizer, 
                                  num_warmup_steps=cfg.training_params.scheduler_warmup_steps, 
-                                 num_training_steps=training_epoch*(total_frames//batch_size + 1))
+                                 num_training_steps=total_update_steps)
 
     dataloader = torch.utils.data.DataLoader(
         dataset,
