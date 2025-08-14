@@ -46,7 +46,7 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
         }
         if self.config.image_features:
             self._queues["observation.images"] = deque(maxlen=self.config.n_obs_steps)
-        if self.config.depth_features:
+        if self.config.use_depth and self.config.depth_features:
             self._queues["observation.depth"] = deque(maxlen=self.config.n_obs_steps)
         if self.config.env_state_feature:
             self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
@@ -81,7 +81,7 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = torch.stack([batch[key] for key in self.config.image_features], dim=-4)
-        if self.config.depth_features:
+        if self.config.use_depth and self.config.depth_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_DEPTH] = torch.stack([batch[key] for key in self.config.depth_features], dim=-4)
         # NOTE: It's important that this happens after stacking the images into a single key.
@@ -100,7 +100,7 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = torch.stack([batch[key] for key in self.config.image_features], dim=-4)
-        if self.config.depth_features:
+        if self.config.use_depth and self.config.depth_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_DEPTH] = torch.stack([batch[key] for key in self.config.depth_features], dim=-4)
         batch = self.normalize_targets(batch)

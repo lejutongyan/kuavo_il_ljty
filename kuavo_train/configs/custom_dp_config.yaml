@@ -15,10 +15,11 @@ training_params:
     output_directory: "outputs/train/${task}"
     timestamp: ${timestamp}
     # "root": None,
-    root: "/home/yangzhou/data/single_grasp_inbox_lerobot_nodepth/lerobot"
+    # root: "/home/yangzhou/data/single_grasp_inbox_lerobot_nodepth/lerobot"
+    root: "/home/yangzhou/data/single_grasp_inbox_new_lerobot/lerobot"
     seed: 42
     training_epoch: 1000
-    batch_size: 128 # 64
+    batch_size: 8 # 64
     save_freq_epoch: 10
     log_freq: 1
     device: "cuda"
@@ -51,6 +52,7 @@ diffusion_configs:
     use_separate_rgb_encoder_per_camera: False
     use_separate_depth_encoder_per_camera: False
 
+    use_depth: True
     depth_backbone: resnet18
     vision_backbone: resnet18
 

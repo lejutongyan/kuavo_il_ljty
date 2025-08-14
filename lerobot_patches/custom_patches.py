@@ -65,7 +65,7 @@ def custom_sample_depth(data, sampled_indices):
     # Loop through each index in sampled_indices to get the corresponding depth map
     for idx in sampled_indices:
         # Extract the depth map for the given batch index, maintaining the 1xHxW shape
-        sampled_depth_maps.append(data[idx, : :, :])
+        sampled_depth_maps.append(auto_downsample_height_width(data[idx, :, :, :]))
 
     # Convert the list to a numpy array of shape (N, 1, H, W)
     return np.array(sampled_depth_maps)
@@ -91,7 +91,7 @@ def compute_episode_stats(episode_data: dict[str, list[str] | np.ndarray], featu
             keepdims = data.ndim == 1  # keep as np.array
 
         ep_stats[key] = get_feature_stats(ep_ft_array, axis=axes_to_reduce, keepdims=keepdims)
-        print("meta stats compute:",key, ep_stats[key]["count"],ep_ft_array.shape)
+        print("meta stats compute:",key, ep_stats[key]["count"],ep_ft_array.shape, "Disregard the shape; it's merely for simplifying the computation of statistics.")
 
         # finally, we normalize and remove batch dim for images
         if features[key]["dtype"] in ["image", "video"]:

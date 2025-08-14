@@ -1,4 +1,3 @@
-
 import lerobot_patches.custom_patches  # Ensure custom patches are applied, DON'T REMOVE THIS LINE!
 
 import hydra
@@ -50,6 +49,8 @@ def main(cfg: DictConfig):
     log_freq = cfg.training_params.log_freq
 
     dataset_metadata = LeRobotDatasetMetadata(cfg.training_params.repoid, root=root)
+    camera_keys = dataset_metadata.camera_keys
+    print("camera_keys: ",camera_keys)
     total_frames = dataset_metadata.info['total_frames']
     features = dataset_to_policy_features(dataset_metadata.features)
     print("Original dataset features:", dataset_metadata.features)
@@ -83,7 +84,8 @@ def main(cfg: DictConfig):
     policy.to(device)
 
     total_params = sum(p.numel() for p in policy.diffusion.parameters())
-    print(f"total parameters: {total_params:,}")
+    # print(f"total parameters: {total_params:,}")
+    # raise ValueError("stop!~~~~~~~~~~~~~~~~~~~~~~~~")
 
     # Extract keys containing "observation" and "action" from metadata.info['features']
     delta_timestamps_keys = {
@@ -136,8 +138,8 @@ def main(cfg: DictConfig):
             image = augmenter.apply_augment_sequence(image)
         return image
     configured_image_transforms = partial(image_transforms,crop_shape=dp_cfg.crop_shape,random_crop=random_crop,resize_shape=dp_cfg.resize_shape,RGB_Augmentation=dp_cfg.RGB_Augmentation)
-    dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root,image_transforms=configured_image_transforms)
-
+    # dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root,image_transforms=configured_image_transforms)
+    dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root)
     # EMA and optimizer
     # ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)
 

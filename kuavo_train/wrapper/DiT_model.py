@@ -372,4 +372,4 @@ DiT_models = {
 
 if __name__ == "__main__":
     net = DiT_S_8()
-    a 
+    

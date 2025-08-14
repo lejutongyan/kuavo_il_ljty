@@ -21,6 +21,7 @@ T = TypeVar("T", bound="CustomDiffusionConfigWrapper")
 @dataclass
 class CustomDiffusionConfigWrapper(DiffusionConfig):
     use_separate_depth_encoder_per_camera: bool = False
+    use_depth: bool = False
     depth_backbone: str = "resnet18"
     custom: Dict[str, Any] = field(default_factory=dict)
 
