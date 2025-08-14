@@ -22,7 +22,8 @@ from tqdm import tqdm
 
 from omegaconf import DictConfig
 
-
+from kuavo_train.utils.augmenter import crop_image,resize_image,DeterministicAugmenterColor
+from functools import partial
 
 
 @hydra.main(config_path="configs", config_name="custom_dp_config", version_base=None)
@@ -63,9 +64,11 @@ def main(cfg: DictConfig):
     # we'll just use the defaults and so no arguments other than input/output features need to be passed.
     dp_cfg = instantiate(cfg.diffusion_configs, input_features=input_features, output_features=output_features, device=cfg.training_params.device)
 
-    print("rgb_image_features",dp_cfg.rgb_image_features)  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
+    print("rgb_image_features",dp_cfg.image_features)  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
+    print("depth_image_features",dp_cfg.depth_features)
     # dp_cfg.validate_features()  # 目前数转里头没有FeatureType.RGB和FeatureType.DEPTH，所以会报错。
-    print("Vision backbone:", dp_cfg.vision_backbone)
+    print("Vision backbone: ", dp_cfg.vision_backbone)
+    print("Depth backbone: ",dp_cfg.depth_backbone,"use depth: ",dp_cfg.use_depth)
     print("Normalization mapping:", dp_cfg.normalization_mapping)
     print("Use UNet:", dp_cfg.use_unet)
     print("optimizer_lr:", dp_cfg.optimizer_lr)
@@ -78,6 +81,9 @@ def main(cfg: DictConfig):
 
     policy.train()
     policy.to(device)
+
+    total_params = sum(p.numel() for p in policy.diffusion.parameters())
+    print(f"total parameters: {total_params:,}")
 
     # Extract keys containing "observation" and "action" from metadata.info['features']
     delta_timestamps_keys = {
@@ -119,7 +125,18 @@ def main(cfg: DictConfig):
     # }
 
     # We can then instantiate the dataset with these delta_timestamps configuration.
-    dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root)
+
+    random_crop = dp_cfg.crop_is_random
+    def image_transforms(image,crop_shape,random_crop,resize_shape,RGB_Augmentation):  
+        image = crop_image(image,target_range=crop_shape,random_crop=random_crop)
+        image = resize_image(image,target_size=resize_shape)
+        if RGB_Augmentation:
+            augmenter = DeterministicAugmenterColor()
+            augmenter.set_random_params()
+            image = augmenter.apply_augment_sequence(image)
+        return image
+    configured_image_transforms = partial(image_transforms,crop_shape=dp_cfg.crop_shape,random_crop=random_crop,resize_shape=dp_cfg.resize_shape,RGB_Augmentation=dp_cfg.RGB_Augmentation)
+    dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root,image_transforms=configured_image_transforms)
 
     # EMA and optimizer
     # ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)

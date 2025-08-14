@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 import sys, importlib
+import numpy as np
 
 
 lerobot_config_types = importlib.import_module("lerobot.configs.types")
@@ -24,6 +25,85 @@ lerobot_config_types.PolicyFeature = PolicyFeature
 sys.modules["lerobot.configs.types"] = lerobot_config_types
 
 
+from lerobot.datasets.compute_stats import (get_feature_stats, 
+                                            sample_indices, 
+                                            load_image_as_numpy,
+                                            auto_downsample_height_width
+                                            )
+
+lerobot_datasets_compute_stats = importlib.import_module("lerobot.datasets.compute_stats")
+def custom_sample_images(image_paths: list[str], sampled_indices) -> np.ndarray:
+
+    images = None
+    for i, idx in enumerate(sampled_indices):
+        path = image_paths[idx]
+        # we load as uint8 to reduce memory usage
+        img = load_image_as_numpy(path, dtype=np.uint8, channel_first=True)
+        img = auto_downsample_height_width(img)
+
+        if images is None:
+            images = np.empty((len(sampled_indices), *img.shape), dtype=np.uint8)
+
+        images[i] = img
+
+    return images
+
+def custom_sample_depth(data, sampled_indices):
+    """
+    Samples depth values from the data based on the sampled indices for the batch dimension.
+    
+    Parameters:
+        data (np.ndarray): A Bx1xHxW array of depth data with dtype np.uint16.
+        sampled_indices (np.ndarray): A 1D array containing indices for sampling from the batch.
+    
+    Returns:
+        np.ndarray: A (N, 1, H, W) array containing the sampled depth maps for each sampled index.
+    """
+    # Initialize a list to store the sampled depth maps
+    sampled_depth_maps = []
+
+    # Loop through each index in sampled_indices to get the corresponding depth map
+    for idx in sampled_indices:
+        # Extract the depth map for the given batch index, maintaining the 1xHxW shape
+        sampled_depth_maps.append(data[idx, : :, :])
+
+    # Convert the list to a numpy array of shape (N, 1, H, W)
+    return np.array(sampled_depth_maps)
+
+def compute_episode_stats(episode_data: dict[str, list[str] | np.ndarray], features: dict) -> dict:
+    ep_stats = {}
+    sampled_indices = sample_indices(len(episode_data["action"]))
+    for key, data in episode_data.items():
+        if features[key]["dtype"] == "string":
+            continue  # HACK: we should receive np.arrays of strings
+        elif features[key]["dtype"] in ["image", "video"]:
+            ep_ft_array = custom_sample_images(data, sampled_indices)  # data is a list of image paths
+            axes_to_reduce = (0, 2, 3)  # keep channel dim
+            keepdims = True
+        elif features[key]["dtype"] == "uint16":
+            ep_ft_array = custom_sample_depth(data, sampled_indices)  # data is already a np.ndarray
+            axes_to_reduce = (0, 2, 3)  # compute stats over the first axis
+            keepdims = True  # keep as np.array
+
+        else:
+            ep_ft_array = data  # data is already a np.ndarray
+            axes_to_reduce = 0  # compute stats over the first axis
+            keepdims = data.ndim == 1  # keep as np.array
+
+        ep_stats[key] = get_feature_stats(ep_ft_array, axis=axes_to_reduce, keepdims=keepdims)
+        print("meta stats compute:",key, ep_stats[key]["count"],ep_ft_array.shape)
+
+        # finally, we normalize and remove batch dim for images
+        if features[key]["dtype"] in ["image", "video"]:
+            ep_stats[key] = {
+                k: v if k == "count" else np.squeeze(v / 255.0, axis=0) for k, v in ep_stats[key].items()
+            }
+
+    return ep_stats
+
+lerobot_datasets_compute_stats.compute_episode_stats = compute_episode_stats
+sys.modules["lerobot.datasets.compute_stats"] = lerobot_datasets_compute_stats
+
 
 
 lerobot_datasets_utils = importlib.import_module("lerobot.datasets.utils")
@@ -34,7 +114,7 @@ def dataset_to_policy_features(features: dict[str, dict]) -> dict[str, PolicyFea
     policy_features = {}
     for key, ft in features.items():
         shape = ft["shape"]
-        if ft["dtype"] in ["image", "video"]:
+        if ft["dtype"] in ["image", "video", "uint16"]:
             if "depth" in key or "DEPTH" in key:
                 type = FeatureType.DEPTH
             else:

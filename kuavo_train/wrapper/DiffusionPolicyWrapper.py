@@ -26,6 +26,7 @@ from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from huggingface_hub.errors import HfHubHTTPError
 
 T = TypeVar("T", bound="CustomDiffusionPolicyWrapper")
+OBS_DEPTH = "observation.depth"
 
 class CustomDiffusionPolicyWrapper(DiffusionPolicy):
     def __init__(self,         
@@ -43,8 +44,10 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
             "observation.state": deque(maxlen=self.config.n_obs_steps),
             "action": deque(maxlen=self.config.n_action_steps),
         }
-        if self.config.rgb_image_features:
+        if self.config.image_features:
             self._queues["observation.images"] = deque(maxlen=self.config.n_obs_steps)
+        if self.config.depth_features:
+            self._queues["observation.depth"] = deque(maxlen=self.config.n_obs_steps)
         if self.config.env_state_feature:
             self._queues["observation.environment_state"] = deque(maxlen=self.config.n_obs_steps)
 
@@ -75,21 +78,13 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
 
         batch = self.normalize_inputs(batch)
 
-        if self.config.rgb_image_features:
+        if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-
-            # Add rgb augmentation
-            for key in self.config.rgb_image_features:
-                if self.config.depth_image_features:
-                    batch[key] = torch.cat([batch[key],batch[key+'_depth'][:,:,0,:,:]],dim=-3)
-                random_crop = self.config.crop_is_random and self.training
-                batch[key] = crop_image(batch[key],self.augmenter.crop_shape,random_crop=random_crop)
-                batch[key] = resize_image(batch[key],self.augmenter.resize_shape)
-
-            batch[OBS_IMAGES] = torch.stack(
-                [batch[key] for key in self.config.rgb_image_features], dim=-4
-            )
-        # Note: It's important that this happens after stacking the images into a single key.
+            batch[OBS_IMAGES] = torch.stack([batch[key] for key in self.config.image_features], dim=-4)
+        if self.config.depth_features:
+            batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
+            batch[OBS_DEPTH] = torch.stack([batch[key] for key in self.config.depth_features], dim=-4)
+        # NOTE: It's important that this happens after stacking the images into a single key.
         self._queues = populate_queues(self._queues, batch)
 
         if len(self._queues[ACTION]) == 0:
@@ -101,27 +96,14 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         """Run the batch through the model and compute the loss for training or validation."""
-        for key in self.config.rgb_image_features:
-            if self.config.RGB_Augmentation:
-                self.augmenter.RGB_Augmenter.set_random_params()
-                batch[key] = self.augmenter.RGB_Augmenter.apply_augment_sequence(batch[key])
         batch = self.normalize_inputs(batch)
-        if self.config.rgb_image_features:
+        if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
-            # rgb augmentation
-            for key in self.config.rgb_image_features:
-                if self.config.depth_image_features:
-                    batch[key] = torch.cat([batch[key],batch[key+'_depth'][:,:,0,:,:]],dim=-3)
-                random_crop = self.config.crop_is_random and self.training
-                batch[key] = crop_image(batch[key],self.augmenter.crop_shape,random_crop=random_crop)
-                batch[key] = resize_image(batch[key],self.augmenter.resize_shape)
-
-            batch[OBS_IMAGES] = torch.stack(
-                [batch[key] for key in self.config.rgb_image_features], dim=-4
-            )
-        # print(f"batch['action'][0,0]: {batch['action'][0,0]}")
+            batch[OBS_IMAGES] = torch.stack([batch[key] for key in self.config.image_features], dim=-4)
+        if self.config.depth_features:
+            batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
+            batch[OBS_DEPTH] = torch.stack([batch[key] for key in self.config.depth_features], dim=-4)
         batch = self.normalize_targets(batch)
-        # print(f"batch['action'][0,0]: {batch['action'][0,0]}")
         loss = self.diffusion.compute_loss(batch)
         # no output_dict so returning None
         return loss, None

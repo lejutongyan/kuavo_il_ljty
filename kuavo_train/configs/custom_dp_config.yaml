@@ -6,19 +6,19 @@ hydra:  # Hydra 配置文件保存目录，不用管，仅供检查使用
     subdir: ${hydra:job.override_dirname}
 
 
-task: "single_grasp_inbox_lerobot"
+task: "single_grasp_inbox_lerobot_only_grasp"
 timestamp: ${now:%Y%m%d_%H%M%S}
-method: "aloha_insert_without_any_Aug"
+method: "test"
 training_params:
     
     repoid: "lerobot/${task}"
     output_directory: "outputs/train/${task}"
     timestamp: ${timestamp}
     # "root": None,
-    root: "D:/data/single_grasp_inbox_lerobot/lerobot"
+    root: "/home/yangzhou/data/single_grasp_inbox_lerobot_nodepth/lerobot"
     seed: 42
-    training_epoch: 4000
-    batch_size: 64 # 64
+    training_epoch: 1000
+    batch_size: 128 # 64
     save_freq_epoch: 10
     log_freq: 1
     device: "cuda"
@@ -49,6 +49,10 @@ diffusion_configs:
     # crop_shape: [84, 84]
     crop_shape: [420, 560]
     use_separate_rgb_encoder_per_camera: False
+    use_separate_depth_encoder_per_camera: False
+
+    depth_backbone: resnet18
+    vision_backbone: resnet18
 
     optimizer_lr: ${training_params.learning_rate}
 

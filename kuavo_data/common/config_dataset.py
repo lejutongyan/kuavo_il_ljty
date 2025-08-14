@@ -14,6 +14,7 @@ class Config:
     only_arm: bool
     eef_type: str  # 'dex_hand' or 'leju_claw'
     which_arm: str  # 'left', 'right', or 'both'
+    use_depth: bool # 是否使用深度数据
     dex_dof_needed: int  # 通常为1，表示只需要第一个关节作为开合依据
     
     # Timeline settings
@@ -35,7 +36,8 @@ class Config:
     @property
     def use_leju_claw(self) -> bool:
         """Determine if using leju claw based on eef_type."""
-        return self.eef_type == 'leju_claw'
+        # return self.eef_type == 'leju_claw'
+        return "claw" in self.eef_type
     
     @property
     def use_qiangnao(self) -> bool:
@@ -50,13 +52,15 @@ class Config:
     @property
     def default_camera_names(self) -> List[str]:
         """Get camera names based on which arm is being used."""
-        cameras = ['head_cam_h']
-        if self.which_arm == 'left':
-            cameras.append('wrist_cam_l')
-        elif self.which_arm == 'right':
-            cameras.append('wrist_cam_r')
-        elif self.which_arm == 'both':
-            cameras.extend(['wrist_cam_r', 'wrist_cam_l'])
+        cameras = ['head_cam_h',"depth_h"]
+        cameras = [{"left":['head_cam_h','wrist_cam_l'],
+                    "right":['head_cam_h','wrist_cam_r'],
+                    "both":['head_cam_h','wrist_cam_l','wrist_cam_r']
+                    },
+                    {"left":['head_cam_h','depth_h','wrist_cam_l','depth_l'],
+                    "right":['head_cam_h','depth_h','wrist_cam_r','depth_r'],
+                    "both":['head_cam_h','depth_h','wrist_cam_l','depth_l','wrist_cam_r','depth_r']
+                    }][int(self.use_depth)][self.which_arm]
         return cameras
     
     @property
@@ -108,8 +112,8 @@ def load_config(cfg) -> Config:
     # Validate eef_type
     eef_type = OmegaConf.select(cfg, "dataset.eef_type")
 
-    if eef_type not in ['dex_hand', 'leju_claw']:
-        raise ValueError(f"Invalid eef_type: {eef_type}, must be 'dex_hand' or 'leju_claw'")
+    if eef_type not in ['dex_hand', 'leju_claw', 'mojuco_claw']:
+        raise ValueError(f"Invalid eef_type: {eef_type}, must be 'dex_hand' or 'leju_claw','mojuco_claw' .")
     
     # Validate which_arm
     which_arm = OmegaConf.select(cfg, 'dataset.which_arm')
@@ -127,9 +131,10 @@ def load_config(cfg) -> Config:
         only_arm=OmegaConf.select(cfg,"dataset.only_arm", default=True),
         eef_type=eef_type,
         which_arm=which_arm,
+        use_depth=OmegaConf.select(cfg, 'dataset.use_depth', default=False),
         dex_dof_needed=OmegaConf.select(cfg, 'dataset.dex_dof_needed', default=1),
         train_hz=OmegaConf.select(cfg, 'dataset.train_hz', default=10),
-        main_timeline=OmegaConf.select(cfg, 'dataset.main_timeline', default='wrist_cam_h'),
+        main_timeline=OmegaConf.select(cfg, 'dataset.main_timeline', default='head_cam_h'),
         main_timeline_fps=OmegaConf.select(cfg, 'dataset.main_timeline_fps', default=30),
         sample_drop=OmegaConf.select(cfg, 'dataset.sample_drop', default=0),
         is_binary=OmegaConf.select(cfg, 'dataset.is_binary', default=False),

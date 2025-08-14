@@ -49,7 +49,7 @@ def init_parameters(cfg):
     global SLICE_ROBOT, SLICE_DEX, SLICE_CLAW
     global IS_BINARY, DELTA_ACTION, RELATIVE_START
     global RESIZE_W, RESIZE_H
-    global ONLY_HALF_UP_BODY, USE_LEJU_CLAW, USE_QIANGNAO
+    global ONLY_HALF_UP_BODY, USE_LEJU_CLAW, USE_QIANGNAO, USE_DEPTH
     global TASK_DESCRIPTION
 
     
@@ -57,6 +57,7 @@ def init_parameters(cfg):
     config = load_config(cfg)
 
     # 从配置文件加载基本设置
+    USE_DEPTH = config.use_depth
     DEFAULT_CAMERA_NAMES = config.default_camera_names
     TRAIN_HZ = config.train_hz
     MAIN_TIMELINE_FPS = config.main_timeline_fps
@@ -125,6 +126,30 @@ class KuavoMsgProcesser:
         cv_img=cv2.resize(cv_img,(RESIZE_W,RESIZE_H)) ### ATT: resize the image to 640x480(w * h)
         return {"data": cv_img, "timestamp": msg.header.stamp.to_sec()}
 
+    @staticmethod
+    def process_depth(msg):
+        if not (hasattr(msg, 'format') and hasattr(msg, 'data')):
+            print(f"Skipping invalid message")
+
+        # print(f"message format: {msg.format}")
+
+        png_magic = bytes([137, 80, 78, 71, 13, 10, 26, 10])
+        idx = msg.data.find(png_magic)
+        if idx == -1:
+            print("PNG header not found, unable to decode.")
+            return None
+
+        png_data = msg.data[idx:]
+        np_arr = np.frombuffer(png_data, np.uint8)
+        image = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)
+        if image is None:
+            print("cv2.imdecode also failed")
+            return None
+
+        if image.dtype != np.uint16:
+            print("Warning: The decoded image is not a 16-bit image, actual dtype: ", image.dtype)
+        return {"data": image[np.newaxis,...], "timestamp": msg.header.stamp.to_sec()}
+
 
     @staticmethod
     def process_joint_state(msg):
@@ -180,10 +205,22 @@ class KuavoMsgProcesser:
         """
         state= msg.data.position
         return { "data": state, "timestamp": msg.header.stamp.to_sec() }
-
+        
     @staticmethod
     def process_claw_cmd(msg):
         position= msg.data.position
+        return { "data": position, "timestamp": msg.header.stamp.to_sec() }
+    
+    @staticmethod
+    def process_mojuco_claw_cmd(msg):
+        position= list([msg.left_cmd])
+        position.extend(list([msg.right_cmd]))
+        return { "data": position, "timestamp": msg.header.stamp.to_sec() }
+
+    @staticmethod
+    def process_mojuco_claw_state(msg):
+        position= list([msg.left_position])
+        position.extend(list([msg.right_position]))
         return { "data": position, "timestamp": msg.header.stamp.to_sec() }
     
     @staticmethod
@@ -202,6 +239,7 @@ class KuavoMsgProcesser:
         position.extend(list(msg.right_hand_position))
         return { "data": position, "timestamp": msg.header.stamp.to_sec() }
     
+
     @staticmethod
     def process_sensors_data_raw_extract_imu(msg):
         imu_data = msg.imu_data
@@ -314,6 +352,14 @@ class KuavoRosbagReader:
                 "topic": "/control_robot_hand_position",
                 "msg_process_fn": self._msg_processer.process_qiangnao_cmd,
             },
+            "observation.mojuco_claw": {
+                "topic": "/gripper/state",
+                "msg_process_fn": self._msg_processer.process_mojuco_claw_state,
+            },
+            "action.mojuco_claw": {
+                "topic": "/gripper/command",
+                "msg_process_fn": self._msg_processer.process_mojuco_claw_cmd,
+            },
         }
         for camera in DEFAULT_CAMERA_NAMES:
             # observation.images.{camera}.depth  => color images
@@ -347,6 +393,21 @@ class KuavoRosbagReader:
                 "topic": f"/zedm/zed_node/right/image_rect_color/compressed",
                 "msg_process_fn": self._msg_processer.process_color_image,
             }
+            elif "depth_h" in camera:
+                self._topic_process_map[f"{camera}"] = {
+                "topic": f"/cam_h/depth/image_raw/compressedDepth",
+                "msg_process_fn": self._msg_processer.process_depth, 
+                }
+            elif "depth_l" in camera:
+                self._topic_process_map[f"{camera}"] = {
+                "topic": f"/cam_l/depth/image_rect_raw/compressedDepth",
+                "msg_process_fn": self._msg_processer.process_depth, 
+                }
+            elif "depth_r" in camera:
+                self._topic_process_map[f"{camera}"] = {
+                "topic": f"/cam_r/depth/image_rect_raw/compressedDepth",
+                "msg_process_fn": self._msg_processer.process_depth, 
+                }
 
             # observation.images.{camera}.depth => depth images
             # self._topic_process_map[f"{camera}.depth"] = {
@@ -419,6 +480,7 @@ class KuavoRosbagReader:
             DEFAULT_CAMERA_NAMES, 
             key=lambda cam_k: len(data.get(cam_k, []))
         )
+        
         jump = MAIN_TIMELINE_FPS // TRAIN_HZ
         main_img_timestamps = [t['timestamp'] for t in data[main_timeline]][SAMPLE_DROP:-SAMPLE_DROP][::jump]
         min_end = min([data[k][-1]['timestamp'] for k in data.keys() if len(data[k]) > 0])
@@ -436,7 +498,7 @@ class KuavoRosbagReader:
         print(f"Aligned {key}: {len((data[main_timeline]))} -> {len(next(iter(aligned_data.values())))}")
         for k, v in aligned_data.items():
             if len(v) > 0:
-                print(v[0]['timestamp'], v[1]['timestamp'],k)
+                print(v[0]['timestamp'], v[1]['timestamp'],"length", k,len(v))
         return aligned_data
     
     

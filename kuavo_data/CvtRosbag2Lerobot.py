@@ -3,7 +3,7 @@ Script to convert Kuavo rosbag data to the LeRobot dataset v2.0 format.
 
 Example usage: uv run examples/aloha_real/convert_aloha_data_to_lerobot.py --raw-dir /path/to/raw/data --repo-id <org>/<dataset-name>
 """
-
+import lerobot_patches.custom_patches  # Ensure custom patches are applied, DON'T REMOVE THIS LINE!
 import dataclasses
 from pathlib import Path
 import shutil
@@ -137,10 +137,11 @@ def create_empty_dataset(
 
     for cam in cameras:
         if 'depth' in cam:
-            features[f"observation.images.{cam}"] = {
-                "dtype": mode,
-                "shape": (kuavo.RESIZE_H, kuavo.RESIZE_W),
+            features[f"observation.{cam}"] = {
+                "dtype": "uint16", 
+                "shape": (1, kuavo.RESIZE_H, kuavo.RESIZE_W),  # Attention: for datasets.features "image" and "video", it must be c,h,w style! 
                 "names": [
+                    "channels",
                     "height",
                     "width",
                 ],
@@ -176,6 +177,7 @@ def load_raw_images_per_camera(bag_data: dict) -> dict[str, np.ndarray]:
     imgs_per_cam = {}
     for camera in get_cameras(bag_data):
         imgs_per_cam[camera] = np.array([msg['data'] for msg in bag_data[camera]])
+        # print(f"camera {camera} image", imgs_per_cam[camera].shape)
     
     return imgs_per_cam
 
@@ -194,6 +196,9 @@ def load_raw_episode_data(
     claw_action= np.array([msg['data'] for msg in bag_data['action.claw']], dtype=np.float64)
     qiangnao_state = np.array([msg['data'] for msg in bag_data['observation.qiangnao']], dtype=np.float64)
     qiangnao_action= np.array([msg['data'] for msg in bag_data['action.qiangnao']], dtype=np.float64)
+    mojuco_claw_state = np.array([msg['data'] for msg in bag_data['observation.mojuco_claw']], dtype=np.float64)
+    mojuco_claw_action= np.array([msg['data'] for msg in bag_data['action.mojuco_claw']], dtype=np.float64)
+    # print("eef_type shape: ",claw_action.shape,qiangnao_action.shape, mojuco_claw_action.shape)
     action[:, 12:26] = action_kuavo_arm_traj    
 
     velocity = None
@@ -201,7 +206,7 @@ def load_raw_episode_data(
     
     imgs_per_cam = load_raw_images_per_camera(bag_data)
     
-    return imgs_per_cam, state, action, velocity, effort ,claw_state ,claw_action,qiangnao_state,qiangnao_action
+    return imgs_per_cam, state, action, velocity, effort ,claw_state ,claw_action,qiangnao_state,qiangnao_action, mojuco_claw_state, mojuco_claw_action
 
 
 def diagnose_frame_data(data):
@@ -228,7 +233,7 @@ def populate_dataset(
         print(colored(f"Processing {ep_path}", "yellow", attrs=["bold"]))
         # 默认读取所有的数据如果话题不存在相应的数值应该是一个空的数据
         try:
-            imgs_per_cam, state, action, velocity, effort ,claw_state, claw_action,qiangnao_state,qiangnao_action= load_raw_episode_data(ep_path)
+            imgs_per_cam, state, action, velocity, effort ,claw_state, claw_action,qiangnao_state,qiangnao_action, mojuco_claw_state, mojuco_claw_action = load_raw_episode_data(ep_path)
         except Exception as e:
             print(f"❌ Error processing {ep_path}: {e}")
             failed_bags.append(str(ep_path))
@@ -239,12 +244,20 @@ def populate_dataset(
             qiangnao_action = np.where(qiangnao_action > 50, 1, 0)
             claw_state = np.where(claw_state > 50, 1, 0)
             claw_action = np.where(claw_action > 50, 1, 0)
+            mojuco_claw_state = np.where(mojuco_claw_state > 0.4, 1, 0)
+            mojuco_claw_action = np.where(mojuco_claw_action > 70, 1, 0)
         else:
             # 进行数据归一化处理
             claw_state = claw_state / 100
             claw_action = claw_action / 100
             qiangnao_state = qiangnao_state / 100
             qiangnao_action = qiangnao_action / 100
+            mojuco_claw_state = mojuco_claw_state / 0.8
+            mojuco_claw_action = mojuco_claw_action / 140
+        print("eef_type shape: ",claw_action.shape,qiangnao_action.shape, mojuco_claw_action.shape)
+        if len(claw_action)==0 and len(qiangnao_action) == 0:
+            claw_action = mojuco_claw_action
+            claw_state = mojuco_claw_state
         ########################
         # delta 处理
         ########################
@@ -313,7 +326,6 @@ def populate_dataset(
                             output_action = action[i, kuavo.SLICE_ROBOT[1][0]:kuavo.SLICE_ROBOT[1][-1]]
                             output_action = np.concatenate((output_action, qiangnao_action[i, kuavo.SLICE_DEX[1][0]:kuavo.SLICE_DEX[1][-1]].astype(np.float32)), axis=0)
                     # output_action = np.concatenate((output_action, action[i, 26:28]), axis=0)
-
             else:
                 if kuavo.USE_LEJU_CLAW:
                     # 使用lejuclaw进行全身关节数据转换
@@ -351,15 +363,17 @@ def populate_dataset(
                     output_action = np.concatenate((output_action, qiangnao_action[i, 0:6].astype(np.float32)),axis=0)
                     output_action = np.concatenate((output_action, action[i, 19:26]), axis=0)
                     output_action = np.concatenate((output_action, qiangnao_action[i, 6:12].astype(np.float32)), axis=0)
-                    output_action = np.concatenate((output_action, action[i, 26:28]), axis=0)
-                
+                    output_action = np.concatenate((output_action, action[i, 26:28]), axis=0)  
             frame = {
                 "observation.state": torch.from_numpy(output_state).type(torch.float32),
                 "action": torch.from_numpy(output_action).type(torch.float32),
             }
             
             for camera, img_array in imgs_per_cam.items():
-                frame[f"observation.images.{camera}"] = img_array[i]
+                if "depth" in camera:
+                    frame[f"observation.{camera}"] = img_array[i]
+                else:
+                    frame[f"observation.images.{camera}"] = img_array[i]
             
             if velocity is not None:
                 frame["observation.velocity"] = velocity[i]

@@ -9,18 +9,20 @@ hydra:  # Hydra 配置文件保存目录，不用管，仅供检查使用
 
 rosbag:
   rosbag_dir: /home/yangzhou/data/rosbag_dex_hand_10_20250805_4800
-  num_used: None
+  num_used: null
   lerobot_dir: D:\data\rosbag_dex_hand_10_20250805_4800_lerobot
 
 dataset:
   only_arm: true  # 默认true, 是否只使用手臂数据, 目前的模仿学习只用于手臂数据
-  eef_type: dex_hand # or leju_claw
-  which_arm: both  # 可选: left, right, both
+  eef_type: dex_hand # or leju_claw, mojuco_claw
+  which_arm: right  # 可选: left, right, both
+  use_depth: false
 
   # task_description: "Pick the black workpiece from the white conveyor belt on your left and place it onto the white box in front of you"
   task_description: "Place the black workpiece from the white desk onto the electronic scale, then move the it to the left white conveyor belt"
 
   train_hz: 10  # 训练采样频率
+  main_timeline: head_cam_h
   main_timeline_fps: 30 # 主相机的帧率，必须稳定, 主相机来自head_cam_h, wrist_cam_l, wrist_cam_r
   sample_drop: 10 # 丢弃回合前后的10帧
 

@@ -1,3 +1,5 @@
+from tkinter import NO
+from sympy import N
 import torch.nn as nn
 from kuavo_train.wrapper.DiffusionConfigWrapper import CustomDiffusionConfigWrapper
 import math
@@ -11,7 +13,7 @@ import torch.nn.functional as F  # noqa: N812
 import torchvision
 from torch import Tensor, nn
 
-from lerobot.constants import OBS_ENV_STATE, OBS_STATE
+from lerobot.constants import OBS_ENV_STATE, OBS_IMAGES, OBS_STATE
 from lerobot.policies.utils import (
     get_device_from_parameters,
     get_dtype_from_parameters,
@@ -25,30 +27,48 @@ from lerobot.policies.diffusion.modeling_diffusion import (_make_noise_scheduler
                                                            DiffusionModel
                                                            )
 
+from kuavo_train.wrapper.DiffusionPolicyWrapper import OBS_DEPTH
+
 class CustomDiffusionModelWrapper(DiffusionModel):
     def __init__(self, config: CustomDiffusionConfigWrapper):
         super().__init__(config)
         self.config = config
 
+        self.config = config
+
         # Build observation encoders (depending on which observations are provided).
-        global_cond_dim = 0
+        # global_cond_dim = self.config.robot_state_feature.shape[0]
+
+        if self.config.robot_state_feature:
+            if self.config.use_state_encoder:
+                self.state_encoder = FeatureEncoder(in_dim=self.config.robot_state_feature.shape[0],out_dim= self.config.state_feature_dim)
+                global_cond_dim = self.config.state_feature_dim
+            else:
+                global_cond_dim = self.config.robot_state_feature.shape[0]
+
         if self.config.image_features:
+            
             num_images = len(self.config.image_features)
             if self.config.use_separate_rgb_encoder_per_camera:
                 encoders = [DiffusionRgbEncoder(config) for _ in range(num_images)]
                 self.rgb_encoder = nn.ModuleList(encoders)
                 global_cond_dim += encoders[0].feature_dim * num_images
+                self.rgb_attn_layer = nn.MultiheadAttention(embed_dim=encoders[0].feature_dim ,num_heads=8,batch_first=True)
             else:
                 self.rgb_encoder = DiffusionRgbEncoder(config)
                 global_cond_dim += self.rgb_encoder.feature_dim * num_images
-
-        if self.config.robot_state_feature:
-            if self.config.use_state_encoder:
-                self.state_encoder = FeatureEncoder(in_dim=self.config.robot_state_feature.shape[0],out_dim= self.config.state_feature_dim)
-                global_cond_dim += self.config.state_feature_dim
+                self.rgb_attn_layer = nn.MultiheadAttention(embed_dim=self.rgb_encoder.feature_dim ,num_heads=8, batch_first=True)
+        if self.config.depth_features:
+            num_depth = len(self.config.depth_features)
+            if self.config.use_separate_depth_encoder_per_camera:
+                encoders = [DiffusionDepthEncoder(config) for _ in range(num_depth)]
+                self.depth_encoder = nn.ModuleList(encoders)
+                global_cond_dim += encoders[0].feature_dim * num_depth
+                self.depth_attn_layer = nn.MultiheadAttention(embed_dim=encoders[0].feature_dim ,num_heads=8, batch_first=True)
             else:
-                global_cond_dim += self.config.robot_state_feature.shape[0]
-
+                self.depth_encoder = DiffusionDepthEncoder(config)
+                global_cond_dim += self.depth_encoder.feature_dim * num_depth
+                self.depth_attn_layer = nn.MultiheadAttention(embed_dim=self.depth_encoder.feature_dim ,num_heads=8, batch_first=True)
         if self.config.env_state_feature:
             global_cond_dim += self.config.env_state_feature.shape[0]
 
@@ -58,6 +78,13 @@ class CustomDiffusionModelWrapper(DiffusionModel):
             self.unet = DiffusionTransformer(config)
         else:
             raise ValueError("Either `use_unet` or `use_transformer` must be True in the configuration.")
+        
+        if self.config.depth_features:
+            feat_dim = self.depth_attn_layer.embed_dim
+            self.multimodalfuse = nn.ModuleDict({
+                "depth_q":nn.MultiheadAttention(embed_dim=feat_dim,num_heads=8,batch_first=True),
+                "rgb_q":nn.MultiheadAttention(embed_dim=feat_dim,num_heads=8,batch_first=True)
+            })
 
         self.noise_scheduler = _make_noise_scheduler(
             config.noise_scheduler_type,
@@ -78,16 +105,18 @@ class CustomDiffusionModelWrapper(DiffusionModel):
 
     def _prepare_global_conditioning(self, batch: dict[str, Tensor]) -> Tensor:
         """Encode image features and concatenate them all together along with the state vector."""
-        batch_size, n_obs_steps = batch[OBS_STATE].shape[:2]
+        batch_size, n_obs_steps, n_camera = batch[OBS_STATE].shape[:3]
         
         global_cond_feats = []
         # global_cond_feats = [batch[OBS_STATE]]
 
         # Extract image features.
+        img_features = None
+        depth_features = None
         if self.config.image_features:
             if self.config.use_separate_rgb_encoder_per_camera:
                 # Combine batch and sequence dims while rearranging to make the camera index dimension first.
-                images_per_camera = einops.rearrange(batch["observation.images"], "b s n ... -> n (b s) ...")
+                images_per_camera = einops.rearrange(batch[OBS_IMAGES], "b s n ... -> n (b s) ...")
                 img_features_list = torch.cat(
                     [
                         encoder(images)
@@ -102,22 +131,76 @@ class CustomDiffusionModelWrapper(DiffusionModel):
             else:
                 # Combine batch, sequence, and "which camera" dims before passing to shared encoder.
                 img_features = self.rgb_encoder(
-                    einops.rearrange(batch["observation.images"], "b s n ... -> (b s n) ...")
+                    einops.rearrange(batch[OBS_IMAGES], "b s n ... -> (b s n) ...")
                 )
                 # Separate batch dim and sequence dim back out. The camera index dim gets absorbed into the
                 # feature dim (effectively concatenating the camera features).
                 img_features = einops.rearrange(
                     img_features, "(b s n) ... -> b s (n ...)", b=batch_size, s=n_obs_steps
                 )
-            global_cond_feats.append(img_features)
+            img_features = einops.rearrange(img_features, "b s (n ...) -> (b s) n ...", n=n_camera)
+            img_features = self.rgb_attn_layer(query=img_features,key=img_features,value=img_features)
+            # img_features = einops.rearrange(
+            #         img_features, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+            #     )
+            # global_cond_feats.append(img_features)
             # print("global_cond_feats.shape",np.array(global_cond_feats[0].cpu().detach().numpy()).shape)
-
+        if self.config.depth_features:
+            if self.config.use_separate_depth_encoder_per_camera:
+                # Combine batch and sequence dims while rearranging to make the camera index dimension first.
+                depth_per_camera = einops.rearrange(batch[OBS_DEPTH], "b s n ... -> n (b s) ...")
+                depth_features_list = torch.cat(
+                    [
+                        encoder(depth)
+                        for encoder, depth in zip(self.depth_encoder, depth_per_camera, strict=True)
+                    ]
+                )
+                # Separate batch and sequence dims back out. The camera index dim gets absorbed into the
+                # feature dim (effectively concatenating the camera features).
+                depth_features = einops.rearrange(
+                    depth_features_list, "(n b s) ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+                )
+            else:
+                # Combine batch, sequence, and "which camera" dims before passing to shared encoder.
+                depth_features = self.depth_encoder(
+                    einops.rearrange(batch[OBS_DEPTH], "b s n ... -> (b s n) ...")
+                )
+                # Separate batch dim and sequence dim back out. The camera index dim gets absorbed into the
+                # feature dim (effectively concatenating the camera features).
+                depth_features = einops.rearrange(
+                    depth_features, "(b s n) ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+                )
+            depth_features = einops.rearrange(depth_features, "b s (n ...) -> (b s) n ...", n=n_camera)
+            depth_features = self.depth_attn_layer(query=depth_features, key=depth_features, value=depth_features)
+            # depth_features = einops.rearrange(
+            #         depth_features, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+            #     )
+            # global_cond_feats.append(depth_features)
+            # print("global_cond_feats.shape",np.array(global_cond_feats[0].cpu().detach().numpy()).shape)
+        if img_features and depth_features:
+            # img_features = einops.rearrange(img_features, "(b s) n ... -> n (b s) ...")
+            # depth_features = einops.rearrange(depth_features, "(b s) n ... -> n (b s) ...")
+            rgb_q_fuse  = self.multimodalfuse["rgb_q"](query=img_features,key=depth_features,value=depth_features)
+            depth_q_fuse = self.multimodalfuse["depth_q"](query=depth_features,key=img_features,value=img_features)
+            rgb_q_fuse = einops.rearrange(
+                    rgb_q_fuse, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+                )
+            depth_q_fuse = einops.rearrange(
+                    depth_q_fuse, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+                )
+            global_cond_feats.extend([rgb_q_fuse, depth_q_fuse])
+        elif img_features:
+            img_features = einops.rearrange(
+                    img_features, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
+                )
+            global_cond_feats.append(img_features)
+  
         if self.config.robot_state_feature:
             if self.config.use_state_encoder:
-                state_features = self.state_encoder(batch["observation.state"])
+                state_features = self.state_encoder(batch[OBS_STATE])
                 global_cond_feats.append(state_features)
             else:
-                global_cond_feats.append(batch['observation.state'])
+                global_cond_feats.append(batch[OBS_STATE])
 
         if self.config.env_state_feature:
             # print(f"Using environment state feature: {OBS_ENV_STATE}")
@@ -136,6 +219,17 @@ class DiffusionRgbEncoder(nn.Module):
 
     def __init__(self, config: CustomDiffusionConfigWrapper):
         super().__init__()
+        # # Set up optional preprocessing.
+        # if config.crop_shape is not None:
+        #     self.do_crop = True
+        #     # Always use center crop for eval
+        #     self.center_crop = torchvision.transforms.CenterCrop(config.crop_shape)
+        #     if config.crop_is_random:
+        #         self.maybe_random_crop = torchvision.transforms.RandomCrop(config.crop_shape)
+        #     else:
+        #         self.maybe_random_crop = self.center_crop
+        # else:
+        #     self.do_crop = False
 
         # Set up backbone.
         backbone_model = getattr(torchvision.models, config.vision_backbone)(
@@ -144,31 +238,6 @@ class DiffusionRgbEncoder(nn.Module):
         # Note: This assumes that the layer4 feature map is children()[-3]
         # TODO(alexander-soare): Use a safer alternative.
         self.backbone = nn.Sequential(*(list(backbone_model.children())[:-2]))
-        
-        # 如果有深度图像特征，需要修改第一层卷积以接受4通道输入
-        if config.depth_features:
-            # 获取第一层卷积
-            c
-            # 创建新的4通道卷积层
-            new_conv = nn.Conv2d(
-                in_channels=4,  # RGB + 深度
-                out_channels=first_conv.out_channels,
-                kernel_size=first_conv.kernel_size,
-                stride=first_conv.stride,
-                padding=first_conv.padding,
-                bias=first_conv.bias is not None
-            )
-            # 初始化新卷积层的权重
-            with torch.no_grad():
-                # 复制RGB通道的权重
-                new_conv.weight[:, :3, :, :] = first_conv.weight
-                # 深度通道的权重初始化为RGB通道的平均值
-                new_conv.weight[:, 3:4, :, :] = first_conv.weight.mean(dim=1, keepdim=True)
-                if first_conv.bias is not None:
-                    new_conv.bias = first_conv.bias
-            # 替换第一层卷积
-            self.backbone[0] = new_conv
-            
         if config.use_group_norm:
             if config.pretrained_backbone_weights:
                 raise ValueError(
@@ -188,20 +257,19 @@ class DiffusionRgbEncoder(nn.Module):
 
         # Note: we have a check in the config class to make sure all images have the same shape.
         images_shape = next(iter(config.image_features.values())).shape
-        if config.depth_features:
-            # 为深度图像特征增加一个channel维度
-            images_shape = (images_shape[0] + 1, *images_shape[1:])
-            
+
         if config.resize_shape is not None:
             dummy_shape_h_w = config.resize_shape
         elif config.crop_shape is not None:
-            if isinstance(config.crop_shape):
+            if isinstance(list(config.crop_shape)[0],(list,tuple)):
                 (x_start, x_end), (y_start, y_end) = config.crop_shape
                 dummy_shape_h_w = (x_end-x_start,y_end-y_start)  
             else:
                 dummy_shape_h_w = config.crop_shape
         else:
             dummy_shape_h_w = images_shape[1:]
+
+        # dummy_shape_h_w = config.crop_shape if config.crop_shape is not None else images_shape[1:]
         dummy_shape = (1, images_shape[0], *dummy_shape_h_w)
         feature_map_shape = get_output_shape(self.backbone, dummy_shape)[1:]
 
@@ -217,12 +285,124 @@ class DiffusionRgbEncoder(nn.Module):
         Returns:
             (B, D) image feature.
         """
+        # Preprocess: maybe crop (if it was set up in the __init__).
+        # if self.do_crop:
+        #     if self.training:  # noqa: SIM108
+        #         x = self.maybe_random_crop(x)
+        #     else:
+        #         # Always use center crop for eval.
+        #         x = self.center_crop(x)
         # Extract backbone feature.
         x = torch.flatten(self.pool(self.backbone(x)), start_dim=1)
         # Final linear layer with non-linearity.
         x = self.relu(self.out(x))
         return x
+    
 
+
+class DiffusionDepthEncoder(nn.Module):
+    """Encodes an RGB image into a 1D feature vector.
+
+    Includes the ability to normalize and crop the image first.
+    """
+
+    def __init__(self, config: CustomDiffusionConfigWrapper):
+        super().__init__()
+        # # Set up optional preprocessing.
+        # if config.crop_shape is not None:
+        #     self.do_crop = True
+        #     # Always use center crop for eval
+        #     self.center_crop = torchvision.transforms.CenterCrop(config.crop_shape)
+        #     if config.crop_is_random:
+        #         self.maybe_random_crop = torchvision.transforms.RandomCrop(config.crop_shape)
+        #     else:
+        #         self.maybe_random_crop = self.center_crop
+        # else:
+        #     self.do_crop = False
+
+        # Set up backbone.
+        backbone_model = getattr(torchvision.models, config.depth_backbone)(
+            weights=config.pretrained_backbone_weights
+        )
+        # Note: This assumes that the layer4 feature map is children()[-3]
+        # TODO(alexander-soare): Use a safer alternative.
+        # self.backbone = nn.Sequential(*(list(backbone_model.children())[:-2]))
+        # change the first conv layer
+        modules = list(backbone_model.children())[:-2]
+        if isinstance(modules[0], nn.Conv2d):
+            old_conv = modules[0]
+            modules[0] = nn.Conv2d(
+                in_channels=1,
+                out_channels=old_conv.out_channels,
+                kernel_size=old_conv.kernel_size,
+                stride=old_conv.stride,
+                padding=old_conv.padding,
+                bias=old_conv.bias is not None
+            )
+            with torch.no_grad():
+                modules[0].weight = nn.Parameter(old_conv.weight.mean(dim=1, keepdim=True))
+
+        self.backbone = nn.Sequential(*modules)
+
+        if config.use_group_norm:
+            if config.pretrained_backbone_weights:
+                raise ValueError(
+                    "You can't replace BatchNorm in a pretrained model without ruining the weights!"
+                )
+            self.backbone = _replace_submodules(
+                root_module=self.backbone,
+                predicate=lambda x: isinstance(x, nn.BatchNorm2d),
+                func=lambda x: nn.GroupNorm(num_groups=x.num_features // 16, num_channels=x.num_features),
+            )
+
+        # Set up pooling and final layers.
+        # Use a dry run to get the feature map shape.
+        # The dummy input should take the number of image channels from `config.image_features` and it should
+        # use the height and width from `config.crop_shape` if it is provided, otherwise it should use the
+        # height and width from `config.image_features`.
+
+        # Note: we have a check in the config class to make sure all images have the same shape.
+        images_shape = next(iter(config.image_features.values())).shape
+
+        if config.resize_shape is not None:
+            dummy_shape_h_w = config.resize_shape
+        elif config.crop_shape is not None:
+            if isinstance(list(config.crop_shape)[0],(list,tuple)):
+                (x_start, x_end), (y_start, y_end) = config.crop_shape
+                dummy_shape_h_w = (x_end-x_start,y_end-y_start)  
+            else:
+                dummy_shape_h_w = config.crop_shape
+        else:
+            dummy_shape_h_w = images_shape[1:]
+
+        # dummy_shape_h_w = config.crop_shape if config.crop_shape is not None else images_shape[1:]
+        dummy_shape = (1, images_shape[0], *dummy_shape_h_w)
+        feature_map_shape = get_output_shape(self.backbone, dummy_shape)[1:]
+
+        self.pool = SpatialSoftmax(feature_map_shape, num_kp=config.spatial_softmax_num_keypoints)
+        self.feature_dim = config.spatial_softmax_num_keypoints * 2
+        self.out = nn.Linear(config.spatial_softmax_num_keypoints * 2, self.feature_dim)
+        self.relu = nn.ReLU()
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: (B, C, H, W) image tensor with pixel values in [0, 1].
+        Returns:
+            (B, D) image feature.
+        """
+        # Preprocess: maybe crop (if it was set up in the __init__).
+        # if self.do_crop:
+        #     if self.training:  # noqa: SIM108
+        #         x = self.maybe_random_crop(x)
+        #     else:
+        #         # Always use center crop for eval.
+        #         x = self.center_crop(x)
+        # Extract backbone feature.
+        x = torch.flatten(self.pool(self.backbone(x)), start_dim=1)
+        # Final linear layer with non-linearity.
+        x = self.relu(self.out(x))
+        return x
 
 
 """
@@ -542,7 +722,7 @@ class DiffusionTransformer(nn.Module):
         self.pred_horizon = config.horizon
         
         # 动态计算条件维度
-        vision_dim = config.spatial_softmax_num_keypoints * 2 * len(config.image_features)
+        vision_dim = config.spatial_softmax_num_keypoints * 2 * len(config.rgb_image_features)
         if config.use_state_encoder:
             state_dim = config.state_feature_dim
         else:

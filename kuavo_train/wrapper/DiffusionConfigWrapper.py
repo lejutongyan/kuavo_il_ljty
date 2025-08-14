@@ -20,6 +20,8 @@ T = TypeVar("T", bound="CustomDiffusionConfigWrapper")
 @PreTrainedConfig.register_subclass("custom_diffusion")
 @dataclass
 class CustomDiffusionConfigWrapper(DiffusionConfig):
+    use_separate_depth_encoder_per_camera: bool = False
+    depth_backbone: str = "resnet18"
     custom: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -66,35 +68,21 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
                 setattr(self, f.name, converted)
 
     @property
-    def rgb_image_features(self) -> dict[str, PolicyFeature]:
+    def image_features(self) -> dict[str, PolicyFeature]:
         return {key: ft for key, ft in self.input_features.items() if ft.type is FeatureType.RGB}
     
     @property
-    def depth_image_features(self) -> dict[str, PolicyFeature]:
+    def depth_features(self) -> dict[str, PolicyFeature]:
         return {key: ft for key, ft in self.input_features.items() if ft.type is FeatureType.DEPTH}
 
     def validate_features(self) -> None:
-        if len(self.image_features) == 0 and self.rgb_image_features==0 and self.depth_image_features==0 and self.env_state_feature is None:
+        if len(self.image_features) == 0 and self.env_state_feature is None:
             raise ValueError("You must provide at least one image or the environment state among the inputs.")
 
         if self.crop_shape is not None:
             if isinstance(self.crop_shape[0],(list,tuple)):
                 (x_start, x_end), (y_start, y_end) = self.crop_shape
                 for key, image_ft in self.image_features.items():
-                    if x_start < 0 or x_end > image_ft.shape[1] or y_start<0 or y_end > image_ft.shape[2]:
-                        raise ValueError(
-                            f"`crop_shape` should fit within the images shapes. Got {self.crop_shape} "
-                            f"for `crop_shape` and {image_ft.shape} for "
-                            f"`{key}`."
-                        )
-                for key, image_ft in self.rgb_image_features.items():
-                    if x_start < 0 or x_end > image_ft.shape[1] or y_start<0 or y_end > image_ft.shape[2]:
-                        raise ValueError(
-                            f"`crop_shape` should fit within the images shapes. Got {self.crop_shape} "
-                            f"for `crop_shape` and {image_ft.shape} for "
-                            f"`{key}`."
-                        )
-                for key, image_ft in self.depth_image_features.items():
                     if x_start < 0 or x_end > image_ft.shape[1] or y_start<0 or y_end > image_ft.shape[2]:
                         raise ValueError(
                             f"`crop_shape` should fit within the images shapes. Got {self.crop_shape} "
@@ -111,17 +99,23 @@ class CustomDiffusionConfigWrapper(DiffusionConfig):
                         )
 
         # Check that all input images have the same shape.
-        first_image_key, first_image_ft = next(iter(self.rgb_image_features.items()))
-        for key, image_ft in self.rgb_image_features.items():
+        first_image_key, first_image_ft = next(iter(self.image_features.items()))
+        
+        for key, image_ft in self.image_features.items():
             if image_ft.shape != first_image_ft.shape:
                 raise ValueError(
                     f"`{key}` does not match `{first_image_key}`, but we expect all image shapes to match."
                 )
-        for key, image_ft in self.depth_image_features.items():
-            if image_ft.shape != first_image_ft.shape:
-                raise ValueError(
-                    f"`{key}` does not match `{first_image_key}`, but we expect all image shapes to match."
-                )
+        if len(self.depth_features)==0:
+            print("No depth features found!")
+        else:
+            first_depth_key, first_depth_ft = next(iter(self.depth_features.items()))
+            for key, image_ft in self.depth_features.items():
+                if image_ft.shape != first_depth_ft.shape:
+                    raise ValueError(
+                        f"`{key}` does not match `{first_depth_key}`, but we expect all image shapes to match."
+                    )
+            
     def _save_pretrained(self, save_directory: Path) -> None:
         cfg_copy = deepcopy(self)
         if isinstance(cfg_copy.custom, dict):
