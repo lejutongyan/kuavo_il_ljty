@@ -194,7 +194,7 @@ class CustomDiffusionModelWrapper(DiffusionModel):
                     depth_q_fuse, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
                 )
             global_cond_feats.extend([rgb_q_fuse, depth_q_fuse])
-        elif img_features:
+        elif img_features is not None:
             img_features = einops.rearrange(
                     img_features, "(b s) n ... -> b s (n ...)", b=batch_size, s=n_obs_steps
                 )

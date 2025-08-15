@@ -8,18 +8,18 @@ hydra:  # Hydra 配置文件保存目录，不用管，仅供检查使用
 
 task: "single_grasp_inbox_lerobot_only_grasp"
 timestamp: ${now:%Y%m%d_%H%M%S}
-method: "test"
+method: "new_model"
 training_params:
     
     repoid: "lerobot/${task}"
     output_directory: "outputs/train/${task}"
     timestamp: ${timestamp}
-    # "root": None,
+    "root": None,
     # root: "/home/yangzhou/data/single_grasp_inbox_lerobot_nodepth/lerobot"
-    root: "/home/yangzhou/data/single_grasp_inbox_new_lerobot/lerobot"
+    # root: "/home/yangzhou/data/single_grasp_inbox_new_lerobot/lerobot"
     seed: 42
     training_epoch: 1000
-    batch_size: 8 # 64
+    batch_size: 256 # 64
     save_freq_epoch: 10
     log_freq: 1
     device: "cuda"
@@ -27,7 +27,7 @@ training_params:
     weight_decay: 1e-6
     scheduler_name: "cosine"
     scheduler_warmup_steps: 100
-    accumulation_steps: 16
+    accumulation_steps: 1
     ema_power: 0.75
     num_workers: 4
     drop_last: False
@@ -44,7 +44,7 @@ diffusion_configs:
         value: MEAN_STD
       DEPTH: 
         _target_: lerobot.configs.types.NormalizationMode
-        value: MIN_MAX
+        value: MEAN_STD
     spatial_softmax_num_keypoints: 64
     crop_is_random: True
     # crop_shape: [84, 84]

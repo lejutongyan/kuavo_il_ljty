@@ -582,10 +582,10 @@ def resize_image(image, target_size, image_type='rgb'):
             # (x, y, c) or (c, x, y)
             if tem_image.shape[0] in [1, 3]:  # 认为是 (c, x, y)
                 tem_image = np.transpose(tem_image, (1, 2, 0))
-                resized_image = cv2.resize(tem_image, target_size, interpolation=interpolation)
+                resized_image = cv2.resize(tem_image, (new_W,new_H), interpolation=interpolation)
                 resized_image = np.transpose(resized_image, (2, 0, 1))
             else:  # 认为是 (x, y, c)
-                resized_image = cv2.resize(tem_image, target_size, interpolation=interpolation)
+                resized_image = cv2.resize(tem_image, (new_W,new_H), interpolation=interpolation)
 
         elif tem_image.ndim == 4:
             # (batch_size, c, x, y) or (batch_size, x, y, c)
@@ -593,11 +593,11 @@ def resize_image(image, target_size, image_type='rgb'):
                 resized_images = []
                 for img in tem_image:
                     img = np.transpose(img, (1, 2, 0))
-                    resized_img = cv2.resize(img, target_size, interpolation=interpolation)
+                    resized_img = cv2.resize(img, (new_W,new_H), interpolation=interpolation)
                     resized_images.append(np.transpose(resized_img, (2, 0, 1)))
                 resized_image = np.stack(resized_images, axis=0)
             else:  # 认为是 (batch_size, x, y, c)
-                resized_images = [cv2.resize(img, target_size, interpolation=interpolation) for img in tem_image]
+                resized_images = [cv2.resize(img, (new_W,new_H), interpolation=interpolation) for img in tem_image]
                 resized_image = np.stack(resized_images, axis=0)
         elif tem_image.ndim == 5:
             if tem_image.shape[2] in [1, 3]:
@@ -606,14 +606,14 @@ def resize_image(image, target_size, image_type='rgb'):
                 resized_images = []
                 for img in tem_image:
                     img = np.transpose(img, (1, 2, 0))
-                    resized_img = cv2.resize(img, target_size, interpolation=interpolation)
+                    resized_img = cv2.resize(img, (new_W,new_H), interpolation=interpolation)
                     resized_images.append(np.transpose(resized_img, (2, 0, 1)))
                 resized_image = np.stack(resized_images, axis=0)
                 resized_image = resized_image.reshape(B, T, C, new_H, new_W)
             else:
                 B, T, H, W, C = tem_image.shape
                 tem_image = tem_image.reshape(B * T, H, W, C)
-                resized_images = [cv2.resize(img, target_size, interpolation=interpolation) for img in tem_image]
+                resized_images = [cv2.resize(img, (new_W,new_H), interpolation=interpolation) for img in tem_image]
                 resized_image = np.stack(resized_images, axis=0)
                 resized_image = resized_image.reshape(B, T, new_H, new_W, C)
         elif tem_image.ndim == 6:
@@ -623,14 +623,14 @@ def resize_image(image, target_size, image_type='rgb'):
                 resized_images = []
                 for img in tem_image:
                     img = np.transpose(img, (1, 2, 0))
-                    resized_img = cv2.resize(img, target_size, interpolation=interpolation)
+                    resized_img = cv2.resize(img, (new_W,new_H), interpolation=interpolation)
                     resized_images.append(np.transpose(resized_img, (2, 0, 1)))
                 resized_image = np.stack(resized_images, axis=0)
                 resized_image = resized_image.reshape(B, T, N, C, new_H, new_W)
             else:
                 B, T, N, H, W, C = tem_image.shape
                 tem_image = tem_image.reshape(B * T * N, H, W, C)
-                resized_images = [cv2.resize(img, target_size, interpolation=interpolation) for img in tem_image]
+                resized_images = [cv2.resize(img, (new_W,new_H), interpolation=interpolation) for img in tem_image]
                 resized_image = np.stack(resized_images, axis=0)
                 resized_image = resized_image.reshape(B, T, N, new_H, new_W, C)
         else:
@@ -639,6 +639,7 @@ def resize_image(image, target_size, image_type='rgb'):
         return torch.tensor(resized_image,dtype=image.dtype,device=image.device)
 
     raise TypeError("Input must be a numpy array or a list of numpy arrays")
+
 
 def crop_image(image, target_range, random_crop=False):
     """
@@ -668,43 +669,21 @@ def crop_image(image, target_range, random_crop=False):
     if isinstance(image, Tensor):
         if isinstance(target_range[0],(list,tuple)) and not random_crop:
             (x_start, x_end), (y_start, y_end) = target_range
-            tem_image = image.cpu().numpy()
-            if tem_image.ndim == 3:
-                # 3 维图像
-                if tem_image.shape[0] in [1, 3, 4, 5]:
-                    # 认为图像格式为 (c, x, y)
-                    cropped_image = tem_image[:, x_start:x_end, y_start:y_end]
-                else:
-                    # 认为图像格式为 (x, y, c)
-                    cropped_image = tem_image[x_start:x_end, y_start:y_end, ...]
-            elif tem_image.ndim == 4:
-                # 4 维图像（批量图像）
-                if tem_image.shape[1] in [1, 3, 4, 5]:
-                    # 认为图像格式为 (batch_size, c, x, y)
-                    cropped_image = tem_image[:, :, x_start:x_end, y_start:y_end]
-                else:
-                    # 认为图像格式为 (batch_size, x, y, c)
-                    cropped_image = tem_image[:, x_start:x_end, y_start:y_end, ...]
-            elif tem_image.ndim == 5:
-                if tem_image.shape[2] in [1, 3, 4, 5]:
-                    cropped_image = tem_image[:, :, :, x_start:x_end, y_start:y_end]
-                else:
-                    cropped_image = tem_image[:, :, x_start:x_end, y_start:y_end, ...]
-            elif tem_image.ndim == 6:
-                if tem_image.shape[3] in [1, 3, 4, 5]:
-                    cropped_image = tem_image[:, :, :, :, x_start:x_end, y_start:y_end]
-                else:
-                    cropped_image = tem_image[:, :, :, x_start:x_end, y_start:y_end, ...]
-            else:
-                raise ValueError(f"Unsupported image shape: {image.shape}")
-
-            return torch.tensor(cropped_image,dtype=image.dtype,device=image.device)
+            cropped_image = torchvision.transforms.functional.crop(image,x_start,y_start,x_end-x_start+1,y_end-y_start+1)
+            cropped_image = torch.tensor(cropped_image,dtype=image.dtype,device=image.device)
+            return cropped_image, (x_start,y_start,x_end-x_start+1,y_end-y_start+1)
         else:
             if random_crop:
-                crop = torchvision.transforms.RandomCrop(target_range)
+                H,W = image.shape[-2],image.shape[-1]
+                top_max = H - target_range[0]
+                left_max = W - target_range[1]
+                top = random.randint(0, top_max)
+                left = random.randint(0, left_max)
+                cropped_image = torchvision.transforms.functional.crop(image,top,left,target_range[0],target_range[1])
+                return cropped_image,(top,left,target_range[0],target_range[1])
             else:
                 crop = torchvision.transforms.CenterCrop(target_range)
-            return crop(image)
+                return crop(image), target_range
 
     raise TypeError("Input must be a numpy array or a list of numpy arrays")
 

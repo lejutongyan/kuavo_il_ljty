@@ -24,6 +24,8 @@ from typing import TypeVar
 from huggingface_hub import HfApi, ModelCard, ModelCardData, hf_hub_download
 from huggingface_hub.constants import SAFETENSORS_SINGLE_FILE
 from huggingface_hub.errors import HfHubHTTPError
+import torchvision
+import torchvision.transforms.functional
 
 T = TypeVar("T", bound="CustomDiffusionPolicyWrapper")
 OBS_DEPTH = "observation.depth"
@@ -34,7 +36,6 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
                  dataset_stats: dict[str, dict[str, Tensor]] | None = None,
     ):
         super().__init__(config, dataset_stats)
-        self.augmenter = Augmenter(config)
         self.diffusion = CustomDiffusionModelWrapper(config)
 
 
@@ -77,12 +78,23 @@ class CustomDiffusionPolicyWrapper(DiffusionPolicy):
             batch.pop(ACTION)
 
         batch = self.normalize_inputs(batch)
-
+        random_crop = self.config.crop_is_random
+        crop_position = None
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
+            for key in self.config.image_features:
+                batch[key], crop_position = crop_image(batch[key],target_range=self.config.crop_shape,random_crop=random_crop)
+                batch[key] = resize_image(batch[key],target_size=self.config.resize_shape)
             batch[OBS_IMAGES] = torch.stack([batch[key] for key in self.config.image_features], dim=-4)
         if self.config.use_depth and self.config.depth_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
+
+            for key in self.config.depth_features:
+                if len(crop_position) == 4:
+                    batch[key] = torchvision.transforms.functional.crop(batch[key],*crop_position)
+                else:
+                    batch[key] = torchvision.transforms.functional.center_crop(batch[key],crop_position)
+                batch[key] = torchvision.transforms.functional.resize(batch[key],self.config.resize_shape)
             batch[OBS_DEPTH] = torch.stack([batch[key] for key in self.config.depth_features], dim=-4)
         # NOTE: It's important that this happens after stacking the images into a single key.
         self._queues = populate_queues(self._queues, batch)

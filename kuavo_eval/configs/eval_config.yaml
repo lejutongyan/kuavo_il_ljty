@@ -2,9 +2,9 @@ use_delta: false
 eval_episodes: 100
 seed: 42
 device: "cuda"  # or "cpu"
-task: "aloha_sim_insert_human"
-method: "aloha_insert_no_aug"
-timestamp: "run_20250710_164014"
-epoch: 239
-max_episode_steps: 150
+task: "aloha_sim_insertion_human"
+method: "new_model"
+timestamp: "run_20250814_204035"
+epoch: 679
+max_episode_steps: 300
 env: aloha

@@ -12,6 +12,7 @@ from lerobot.configs.types import FeatureType
 from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 from lerobot.datasets.utils import dataset_to_policy_features
 from kuavo_train.wrapper.DiffusionPolicyWrapper import CustomDiffusionPolicyWrapper
+from kuavo_train.wrapper.LeRobotDatasetWrapper import CustomLeRobotDataset
 from torch.utils.tensorboard import SummaryWriter
 from hydra.utils import instantiate
 
@@ -84,7 +85,7 @@ def main(cfg: DictConfig):
     policy.to(device)
 
     total_params = sum(p.numel() for p in policy.diffusion.parameters())
-    # print(f"total parameters: {total_params:,}")
+    print(f"total parameters: {total_params:,}")
     # raise ValueError("stop!~~~~~~~~~~~~~~~~~~~~~~~~")
 
     # Extract keys containing "observation" and "action" from metadata.info['features']
@@ -129,21 +130,27 @@ def main(cfg: DictConfig):
     # We can then instantiate the dataset with these delta_timestamps configuration.
 
     random_crop = dp_cfg.crop_is_random
-    def image_transforms(image,crop_shape,random_crop,resize_shape,RGB_Augmentation):  
-        image = crop_image(image,target_range=crop_shape,random_crop=random_crop)
+    def image_transforms(image,crop_shape,random_crop,resize_shape,RGB_Augmentation): 
+        image, crop_position = crop_image(image,target_range=crop_shape,random_crop=random_crop)
         image = resize_image(image,target_size=resize_shape)
         if RGB_Augmentation:
             augmenter = DeterministicAugmenterColor()
             augmenter.set_random_params()
             image = augmenter.apply_augment_sequence(image)
-        return image
-    configured_image_transforms = partial(image_transforms,crop_shape=dp_cfg.crop_shape,random_crop=random_crop,resize_shape=dp_cfg.resize_shape,RGB_Augmentation=dp_cfg.RGB_Augmentation)
-    # dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root,image_transforms=configured_image_transforms)
-    dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root)
+        return image,  crop_position, resize_shape
+
+    configured_image_transforms = partial(
+        image_transforms,
+        crop_shape=dp_cfg.crop_shape,
+        random_crop=random_crop,
+        resize_shape=dp_cfg.resize_shape,
+        RGB_Augmentation=dp_cfg.RGB_Augmentation)
+    dataset = CustomLeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root,image_transforms=configured_image_transforms)
+    # dataset = LeRobotDataset(cfg.training_params.repoid, delta_timestamps=delta_timestamps,root=root)
     # EMA and optimizer
     # ema = EMAModel(model=policy, parameters=policy.parameters(), power=cfg.training_params.ema_power)
 
-    optimizer = torch.optim.AdamW(params=policy.parameters(), lr=cfg.training_params.learning_rate, weight_decay=cfg.training_params.weight_decay)
+    optimizer = torch.optim.Adam(params=policy.parameters(), lr=cfg.training_params.learning_rate, weight_decay=cfg.training_params.weight_decay)
     
     updates_per_epoch = (total_frames // (batch_size * cfg.training_params.accumulation_steps)) + 1
     total_update_steps = training_epoch * updates_per_epoch
